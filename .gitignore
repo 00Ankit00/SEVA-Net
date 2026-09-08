@@ -1,0 +1,17 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Fetched assets - recreate with: python scripts/fetch_assets.py
+yolov8n.pt
+*.pt
+data/videos/*.mp4
+data/videos/*.avi
+data/videos/*.mov
+
+# Trial output
+results/*.json
+
+# Editor / tooling config (not needed to run the project)
+.claude/

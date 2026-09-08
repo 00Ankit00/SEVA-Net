@@ -1,0 +1,75 @@
+# ============================================================================
+# SEVA-Net configuration  (FR-10, NFR-6: all tuning is external to the code)
+# ============================================================================
+
+camera:
+  # Software-simulated camera (FR-1). A recorded file looped forever stands in
+  # for a physical IP camera. Set `source` to an .mp4 path, an RTSP URL, or the
+  # literal "synthetic" to use the built-in scene generator.
+  source: "auto"          # auto -> use data/videos/*.mp4 if present, else synthetic
+  loop: true
+  sample_fps: 4.0         # FR-3: frame sampling rate
+  reconnect_delay_s: 2.0  # FR-2: auto reconnect on stream drop
+
+detector:
+  # FR-4. YOLOv8n if ultralytics is installed, else the deterministic
+  # simulated detector so the pipeline is always demonstrable.
+  backend: "auto"         # auto | yolo | simulated
+  weights: "yolov8n.pt"
+  conf_threshold: 0.30
+  imgsz: 480
+  # Intrusion-relevant COCO classes only.
+  classes: [person, bicycle, car, motorcycle, bus, truck]
+
+encoder:
+  # 10.2 DNA-SE mode-switch logic.
+  ewma_alpha: 0.30         # FR-8: EWMA decay factor
+  # FR-9: hysteresis band. switch_down < switch_up, so a link hovering inside
+  # the band never causes a mode change.
+  bw_switch_down_mbps: 1.20   # HIGH -> LOW below this
+  bw_switch_up_mbps: 2.00     # LOW  -> HIGH above this
+  lat_switch_down_ms: 180.0   # HIGH -> LOW above this
+  lat_switch_up_ms: 120.0     # LOW  -> HIGH below this
+  min_hold_s: 1.0             # minimum dwell in a mode before another switch
+  start_mode: "high"
+
+payload:
+  # Section 9 payload contract.
+  thumbnail_max_px: 160     # ROI thumbnail longest edge (FR-5, FR-11)
+  thumbnail_jpeg_quality: 55
+  max_objects_per_frame: 4
+  baseline_jpeg_quality: 85 # full-frame baseline for the savings KPI (NFR-4)
+
+qos:
+  # FR-6 / FR-7: active probing over the emulated link.
+  probe_interval_s: 0.8     # target <= 1 s
+  probe_bytes: 24000        # iPerf3-style throughput probe
+  ping_bytes: 64            # ICMP-style latency probe
+
+link:
+  # Emulated camera->cloud backhaul. Stands in for the Mininet link on hosts
+  # where Mininet cannot run (it is Linux-only). Same knobs, same semantics.
+  initial:
+    bw_mbps: 8.0
+    delay_ms: 18.0
+    jitter_ms: 4.0
+    loss_pct: 0.0
+    label: "Healthy backhaul"
+  # Scripted degradation timeline, in seconds from pipeline start.
+  # The dashboard can override this live.
+  scenario:
+    - {at_s: 0,   bw_mbps: 8.0, delay_ms: 18,  jitter_ms: 4,  loss_pct: 0.0, label: "Healthy backhaul"}
+    - {at_s: 30,  bw_mbps: 2.6, delay_ms: 45,  jitter_ms: 10, loss_pct: 0.3, label: "Peak-hour load"}
+    - {at_s: 55,  bw_mbps: 0.5, delay_ms: 190, jitter_ms: 40, loss_pct: 3.0, label: "Congestion collapse"}
+    - {at_s: 95,  bw_mbps: 1.6, delay_ms: 130, jitter_ms: 55, loss_pct: 1.5, label: "Noisy recovery (flap test)"}
+    - {at_s: 130, bw_mbps: 7.0, delay_ms: 22,  jitter_ms: 5,  loss_pct: 0.0, label: "Backhaul restored"}
+  loop_scenario: true
+
+cloud:
+  host: "127.0.0.1"
+  port: 8000
+  max_events: 400          # FR-16 in-memory history
+
+run:
+  duration_s: 0            # 0 = run until stopped
+  results_dir: "results"

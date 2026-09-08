@@ -1,0 +1,13 @@
+# Core pipeline
+numpy>=1.24
+opencv-python-headless>=4.8
+PyYAML>=6.0
+
+# Cloud dashboard
+fastapi>=0.110
+uvicorn[standard]>=0.27
+websockets>=12.0
+
+# Edge inference (optional - without it SEVA-Net uses the simulated detector)
+ultralytics>=8.1
+torch>=2.0

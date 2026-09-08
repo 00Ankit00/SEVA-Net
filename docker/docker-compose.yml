@@ -1,0 +1,46 @@
+# NFR-5: the full pipeline reproducible from one file.
+#
+#   docker compose -f docker/docker-compose.yml up --build
+#   open http://localhost:8000
+#
+# The cloud container runs the dashboard with the edge pipeline attached, which
+# is the demo configuration. The edge container runs a headless trial and
+# writes a KPI report into ../results.
+services:
+  cloud:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.cloud
+    container_name: seva-cloud
+    ports:
+      - "8000:8000"
+    volumes:
+      - ../data:/app/data:ro
+      - ../results:/app/results
+      - ../yolov8n.pt:/app/yolov8n.pt:ro
+    networks:
+      seva:
+        ipv4_address: 172.28.0.20
+
+  edge:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.edge
+    container_name: seva-edge
+    depends_on:
+      - cloud
+    volumes:
+      - ../data:/app/data:ro
+      - ../results:/app/results
+      - ../yolov8n.pt:/app/yolov8n.pt:ro
+    networks:
+      seva:
+        ipv4_address: 172.28.0.10
+    profiles: ["trial"]
+
+networks:
+  seva:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.28.0.0/24

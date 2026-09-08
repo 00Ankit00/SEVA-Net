@@ -1,0 +1,594 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SEVA-Net — Cloud Dashboard</title>
+<style>
+  :root{
+    --bg:#0b0f14; --panel:#121821; --panel-2:#161e29; --line:#243040;
+    --ink:#e6edf5; --muted:#8497ad; --dim:#5d6f86;
+    --high:#3ddc97; --low:#ffb454; --danger:#ff6b6b; --accent:#4aa8ff;
+    --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+       font:14px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif}
+  a{color:var(--accent)}
+
+  header{display:flex;align-items:center;gap:18px;flex-wrap:wrap;
+         padding:14px 22px;border-bottom:1px solid var(--line);background:var(--panel)}
+  .brand h1{margin:0;font-size:18px;letter-spacing:.5px}
+  .brand p{margin:2px 0 0;color:var(--muted);font-size:12px}
+  .spacer{flex:1}
+
+  .badge{font:11px/1 var(--mono);text-transform:uppercase;letter-spacing:.8px;
+         padding:6px 10px;border-radius:20px;border:1px solid var(--line);
+         color:var(--muted);background:var(--panel-2);white-space:nowrap}
+  .mode-chip{display:flex;align-items:center;gap:10px;padding:8px 16px;border-radius:10px;
+             border:1px solid var(--line);background:var(--panel-2);min-width:220px}
+  .mode-chip .dot{width:11px;height:11px;border-radius:50%;background:var(--high);
+                  box-shadow:0 0 12px var(--high)}
+  .mode-chip.low .dot{background:var(--low);box-shadow:0 0 12px var(--low)}
+  .mode-chip .lbl{font:11px/1 var(--mono);color:var(--muted);text-transform:uppercase;
+                  letter-spacing:1px}
+  .mode-chip .val{font:700 17px/1.1 var(--mono);color:var(--high)}
+  .mode-chip.low .val{color:var(--low)}
+  .mode-chip .sub{font-size:11px;color:var(--dim)}
+
+  main{display:grid;grid-template-columns:320px minmax(0,1fr) 300px;gap:16px;padding:16px;
+       align-items:start}
+  @media(max-width:1250px){main{grid-template-columns:1fr}}
+
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;
+        margin-bottom:16px;overflow:hidden}
+  .card h2{margin:0;padding:11px 15px;font-size:12px;text-transform:uppercase;
+           letter-spacing:1px;color:var(--muted);border-bottom:1px solid var(--line);
+           background:var(--panel-2);font-weight:600}
+  .card .body{padding:14px 15px}
+
+  .kv{display:flex;justify-content:space-between;gap:10px;padding:5px 0;
+      border-bottom:1px dashed rgba(255,255,255,.05);font-size:13px}
+  .kv:last-child{border-bottom:0}
+  .kv span:first-child{color:var(--muted)}
+  .kv span:last-child{font-family:var(--mono);color:var(--ink)}
+
+  /* hysteresis band meter */
+  .meter{margin:6px 0 14px}
+  .meter .top{display:flex;justify-content:space-between;font-size:12px;color:var(--muted);
+              margin-bottom:6px}
+  .meter .top b{font-family:var(--mono);color:var(--ink);font-weight:600}
+  .track{position:relative;height:26px;border-radius:6px;background:#0a0e13;
+         border:1px solid var(--line);overflow:hidden}
+  .band{position:absolute;top:0;bottom:0;background:rgba(255,180,84,.16);
+        border-left:1px solid rgba(255,180,84,.55);border-right:1px solid rgba(61,220,151,.55)}
+  .fill{position:absolute;top:0;bottom:0;left:0;background:linear-gradient(90deg,#1f6f8b,#4aa8ff);
+        opacity:.55}
+  .needle{position:absolute;top:-2px;bottom:-2px;width:2px;background:#fff;
+          box-shadow:0 0 8px rgba(255,255,255,.8)}
+  .meter .scale{display:flex;justify-content:space-between;font:10px var(--mono);
+                color:var(--dim);margin-top:4px}
+
+  .reason{font:11px/1.45 var(--mono);color:var(--muted);background:#0a0e13;
+          border:1px solid var(--line);border-radius:6px;padding:8px 10px;margin-top:10px;
+          min-height:34px}
+
+  canvas{display:block;width:100%;height:190px}
+
+  /* KPI grid */
+  .kpis{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .kpi{background:var(--panel-2);border:1px solid var(--line);border-radius:9px;padding:10px}
+  .kpi .n{font:700 19px/1.15 var(--mono);color:var(--ink)}
+  .kpi .n.good{color:var(--high)} .kpi .n.warn{color:var(--low)}
+  .kpi .t{font-size:10.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.6px;
+          margin-top:3px;line-height:1.3}
+  .kpi.wide{grid-column:1/-1}
+
+  /* buttons */
+  .btns{display:flex;flex-wrap:wrap;gap:7px}
+  button{font:600 12px/1 system-ui,sans-serif;color:var(--ink);background:var(--panel-2);
+         border:1px solid var(--line);border-radius:7px;padding:9px 12px;cursor:pointer;
+         transition:.12s}
+  button:hover{border-color:var(--accent);color:#fff}
+  button.on{background:var(--accent);border-color:var(--accent);color:#04121f}
+  button.danger:hover{border-color:var(--danger);color:var(--danger)}
+
+  .slider{margin:10px 0}
+  .slider label{display:flex;justify-content:space-between;font-size:12px;color:var(--muted);
+                margin-bottom:4px}
+  .slider label b{font-family:var(--mono);color:var(--ink);font-weight:600}
+  input[type=range]{width:100%;accent-color:var(--accent)}
+
+  /* event feed */
+  .feed{max-height:560px;overflow-y:auto;padding:10px 12px}
+  .ev{display:flex;gap:11px;padding:9px;border:1px solid var(--line);border-radius:9px;
+      background:var(--panel-2);margin-bottom:8px;animation:in .25s ease}
+  @keyframes in{from{opacity:0;transform:translateY(-5px)}to{opacity:1;transform:none}}
+  .ev.low{border-left:3px solid var(--low)}
+  .ev.high{border-left:3px solid var(--high)}
+  .thumb{width:76px;height:76px;flex:none;border-radius:6px;object-fit:cover;
+         background:#0a0e13;border:1px solid var(--line)}
+  .noimg{width:76px;height:76px;flex:none;border-radius:6px;background:#0a0e13;
+         border:1px dashed rgba(255,180,84,.45);display:flex;align-items:center;
+         justify-content:center;text-align:center;font:9px/1.3 var(--mono);
+         color:var(--low);padding:5px}
+  .ev .meta{flex:1;min-width:0}
+  .ev .row1{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  .ev .tag{font:10px/1 var(--mono);text-transform:uppercase;letter-spacing:.6px;
+           padding:3px 7px;border-radius:4px;background:rgba(74,168,255,.14);color:var(--accent)}
+  .ev .tag.low{background:rgba(255,180,84,.15);color:var(--low)}
+  .ev .tag.high{background:rgba(61,220,151,.15);color:var(--high)}
+  .ev .title{font-weight:600;font-size:13.5px}
+  .ev .facts{font:11px var(--mono);color:var(--dim);margin-top:5px;
+             display:flex;gap:12px;flex-wrap:wrap}
+  .empty{color:var(--dim);text-align:center;padding:26px;font-size:13px}
+
+  .legend{display:flex;gap:14px;flex-wrap:wrap;font:10.5px var(--mono);color:var(--dim);
+          padding:8px 15px 0}
+  .legend i{display:inline-block;width:11px;height:3px;border-radius:2px;margin-right:5px;
+            vertical-align:middle}
+  .note{font-size:11px;color:var(--dim);line-height:1.5;margin-top:9px}
+  .feed::-webkit-scrollbar{width:8px}
+  .feed::-webkit-scrollbar-thumb{background:var(--line);border-radius:4px}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="brand">
+    <h1>SEVA-Net</h1>
+    <p>Dynamic Network-Aware Semantic Encoding &mdash; cloud dashboard</p>
+  </div>
+  <div class="spacer"></div>
+  <span class="badge" id="b-camera">camera —</span>
+  <span class="badge" id="b-detector">detector —</span>
+  <span class="badge" id="b-link">link —</span>
+  <span class="badge" id="b-conn">connecting…</span>
+  <div class="mode-chip" id="modeChip">
+    <div class="dot"></div>
+    <div>
+      <div class="lbl">Transmission mode</div>
+      <div class="val" id="modeVal">HIGH</div>
+      <div class="sub" id="modeSub">JSON + ROI thumbnail</div>
+    </div>
+  </div>
+</header>
+
+<main>
+  <!-- ── left: DNA-SE decision + controls ── -->
+  <section>
+    <div class="card">
+      <h2>DNA-SE decision state</h2>
+      <div class="body">
+        <div class="meter">
+          <div class="top"><span>EWMA bandwidth</span><b id="mBw">— Mbps</b></div>
+          <div class="track" id="bwTrack">
+            <div class="fill" id="bwFill"></div>
+            <div class="band" id="bwBand"></div>
+            <div class="needle" id="bwNeedle"></div>
+          </div>
+          <div class="scale"><span>0</span><span id="bwMid">band</span><span id="bwMax">10 Mbps</span></div>
+        </div>
+        <div class="meter">
+          <div class="top"><span>EWMA latency</span><b id="mLat">— ms</b></div>
+          <div class="track" id="latTrack">
+            <div class="fill" id="latFill"></div>
+            <div class="band" id="latBand"></div>
+            <div class="needle" id="latNeedle"></div>
+          </div>
+          <div class="scale"><span>0</span><span>band</span><span id="latMax">300 ms</span></div>
+        </div>
+        <div class="kv"><span>Raw sample</span><span id="rawSample">—</span></div>
+        <div class="kv"><span>EWMA α</span><span id="alphaV">—</span></div>
+        <div class="kv"><span>Hysteresis band</span><span id="bandV">—</span></div>
+        <div class="reason" id="reason">awaiting first QoS sample…</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Network conditions (link injection)</h2>
+      <div class="body">
+        <div class="btns" id="presets">
+          <button data-p="healthy">Healthy 8 Mbps</button>
+          <button data-p="peak">Peak load</button>
+          <button data-p="degraded">Degraded</button>
+          <button data-p="collapse">Collapse</button>
+          <button data-p="noisy">Noisy (flap test)</button>
+        </div>
+        <div class="slider">
+          <label>Bandwidth cap <b id="lBw">8.0 Mbps</b></label>
+          <input type="range" id="sBw" min="0.2" max="10" step="0.1" value="8">
+        </div>
+        <div class="slider">
+          <label>One-way delay <b id="lDelay">18 ms</b></label>
+          <input type="range" id="sDelay" min="5" max="400" step="5" value="18">
+        </div>
+        <div class="slider">
+          <label>Packet loss <b id="lLoss">0.0 %</b></label>
+          <input type="range" id="sLoss" min="0" max="10" step="0.1" value="0">
+        </div>
+        <div class="btns">
+          <button id="scenBtn">Scripted scenario: ON</button>
+          <button id="resetBtn" class="danger">Reset KPIs</button>
+        </div>
+        <p class="note">Presets and sliders emulate <code>tc</code> on the camera&rarr;cloud
+        link. Moving them takes the link off the scripted timeline.</p>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Encoder tuning (FR-10)</h2>
+      <div class="body">
+        <div class="slider">
+          <label>EWMA α (smoothing) <b id="lAlpha">0.30</b></label>
+          <input type="range" id="sAlpha" min="0.05" max="0.9" step="0.05" value="0.3">
+        </div>
+        <div class="slider">
+          <label>HIGH&rarr;LOW below <b id="lDown">1.20 Mbps</b></label>
+          <input type="range" id="sDown" min="0.2" max="5" step="0.1" value="1.2">
+        </div>
+        <div class="slider">
+          <label>LOW&rarr;HIGH above <b id="lUp">2.00 Mbps</b></label>
+          <input type="range" id="sUp" min="0.3" max="8" step="0.1" value="2.0">
+        </div>
+        <p class="note">A wider band suppresses flapping but slows recovery.
+        Changes apply live &mdash; no restart.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── centre: chart + event feed ── -->
+  <section>
+    <div class="card">
+      <h2>QoS telemetry &amp; mode timeline</h2>
+      <canvas id="chart"></canvas>
+      <div class="legend">
+        <span><i style="background:#4aa8ff"></i>measured bandwidth</span>
+        <span><i style="background:#fff"></i>EWMA</span>
+        <span><i style="background:#3ddc97"></i>switch-up threshold</span>
+        <span><i style="background:#ffb454"></i>switch-down threshold</span>
+        <span><i style="background:rgba(255,180,84,.35)"></i>LOW-mode periods</span>
+      </div>
+      <div class="body" style="padding-top:10px">
+        <div class="kv"><span>Link profile</span><span id="linkProfile">—</span></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Live event feed <span style="text-transform:none;color:var(--dim)"
+          id="feedCount"></span></h2>
+      <div class="feed" id="feed">
+        <div class="empty">Waiting for detections from the edge node…</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── right: KPIs ── -->
+  <section>
+    <div class="card">
+      <h2>KPIs (PRD §13)</h2>
+      <div class="body">
+        <div class="kpis">
+          <div class="kpi wide">
+            <div class="n good" id="kSave">—</div>
+            <div class="t">Bandwidth saved vs. full-frame streaming</div>
+          </div>
+          <div class="kpi"><div class="n" id="kTrans">—</div>
+            <div class="t">Mode-switch latency</div></div>
+          <div class="kpi"><div class="n" id="kFlap">—</div>
+            <div class="t">Flap rate / hour</div></div>
+          <div class="kpi"><div class="n" id="kE2e">—</div>
+            <div class="t">End-to-end alert latency</div></div>
+          <div class="kpi"><div class="n" id="kInfer">—</div>
+            <div class="t">Edge inference / frame</div></div>
+          <div class="kpi"><div class="n" id="kAvgP">—</div>
+            <div class="t">Avg payload size</div></div>
+          <div class="kpi"><div class="n" id="kSwitch">—</div>
+            <div class="t">Mode transitions</div></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Traffic accounting</h2>
+      <div class="body">
+        <div class="kv"><span>Frames processed</span><span id="tFrames">—</span></div>
+        <div class="kv"><span>Objects detected</span><span id="tDet">—</span></div>
+        <div class="kv"><span>Payloads delivered</span><span id="tDeliv">—</span></div>
+        <div class="kv"><span>Payloads lost</span><span id="tDrop">—</span></div>
+        <div class="kv"><span>Sent in HIGH</span><span id="tHigh">—</span></div>
+        <div class="kv"><span>Sent in LOW</span><span id="tLow">—</span></div>
+        <div class="kv"><span>Total transmitted</span><span id="tSent">—</span></div>
+        <div class="kv"><span>Streaming baseline</span><span id="tBase">—</span></div>
+        <div class="kv"><span>Uptime</span><span id="tUp">—</span></div>
+        <div class="btns" style="margin-top:12px">
+          <button id="reportBtn">Export KPI report</button>
+        </div>
+        <p class="note" id="reportNote"></p>
+      </div>
+    </div>
+  </section>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+const fmtBytes = b => b>=1048576 ? (b/1048576).toFixed(2)+" MB"
+                    : b>=1024 ? (b/1024).toFixed(1)+" KB" : (b|0)+" B";
+
+let TH = {bw_switch_down_mbps:1.2, bw_switch_up_mbps:2.0,
+          lat_switch_down_ms:180, lat_switch_up_ms:120};
+const history = [];      // {t, bw, ewma, mode}
+const MAXPTS = 240;
+let touchedLink = false, touchedEnc = false;
+
+/* ── websocket ────────────────────────────────────────────── */
+let ws, retry = 0;
+function connect(){
+  ws = new WebSocket((location.protocol==="https:"?"wss://":"ws://")+location.host+"/ws");
+  ws.onopen = () => { retry=0; $("b-conn").textContent="live";
+                      $("b-conn").style.color="var(--high)";
+                      setInterval(()=>{ if(ws.readyState===1) ws.send("ping"); },15000); };
+  ws.onclose = () => { $("b-conn").textContent="reconnecting…";
+                       $("b-conn").style.color="var(--low)";
+                       setTimeout(connect, Math.min(1000*++retry, 5000)); };
+  ws.onmessage = e => {
+    const m = JSON.parse(e.data);
+    if(m.type==="telemetry") applyTelemetry(m);
+    else if(m.type==="event") addEvent(m, true);
+    else if(m.type==="snapshot"){
+      if(m.telemetry) applyTelemetry(m.telemetry);
+      (m.events||[]).forEach(ev => addEvent(ev,false));
+    }
+  };
+}
+connect();
+
+/* ── telemetry ────────────────────────────────────────────── */
+function applyTelemetry(t){
+  TH = t.thresholds || TH;
+  const low = t.mode === "low";
+
+  const chip = $("modeChip");
+  chip.classList.toggle("low", low);
+  $("modeVal").textContent = t.mode.toUpperCase();
+  $("modeSub").textContent = low ? "JSON only — images dropped"
+                                 : "JSON + ROI thumbnail";
+
+  $("mBw").textContent  = t.ewma.bw_mbps.toFixed(2)+" Mbps";
+  $("mLat").textContent = t.ewma.lat_ms.toFixed(0)+" ms";
+  $("rawSample").textContent =
+      `${t.sample.bw_mbps.toFixed(2)} Mbps / ${t.sample.lat_ms.toFixed(0)} ms`;
+  $("alphaV").textContent = (TH.ewma_alpha||0).toFixed(2);
+  $("bandV").textContent =
+      `${TH.bw_switch_down_mbps.toFixed(2)} – ${TH.bw_switch_up_mbps.toFixed(2)} Mbps`;
+  $("reason").textContent = t.reason || "—";
+
+  drawMeter("bw", t.ewma.bw_mbps, TH.bw_switch_down_mbps, TH.bw_switch_up_mbps,
+            Math.max(10, TH.bw_switch_up_mbps*2));
+  drawMeter("lat", t.ewma.lat_ms, TH.lat_switch_up_ms, TH.lat_switch_down_ms,
+            Math.max(300, TH.lat_switch_down_ms*1.8));
+  $("bwMid").textContent = "band";
+  $("bwMax").textContent = Math.max(10, TH.bw_switch_up_mbps*2).toFixed(0)+" Mbps";
+  $("latMax").textContent = Math.max(300, TH.lat_switch_down_ms*1.8).toFixed(0)+" ms";
+
+  const L = t.link || {};
+  $("b-link").textContent =
+      `${(L.bw_mbps||0).toFixed(1)} Mbps · ${(L.delay_ms||0).toFixed(0)} ms · ${(L.loss_pct||0).toFixed(1)}% loss`;
+  $("linkProfile").textContent =
+      `${L.label||"—"} — ${(L.bw_mbps||0).toFixed(2)} Mbps, ${(L.delay_ms||0).toFixed(0)} ms delay, `+
+      `${(L.jitter_ms||0).toFixed(0)} ms jitter, ${(L.loss_pct||0).toFixed(1)}% loss`;
+
+  const P = t.pipeline || {};
+  $("b-camera").textContent = "camera: " + (P.camera||"—");
+  $("b-detector").textContent = "detector: " + (P.detector||"—");
+  $("b-detector").title = P.detector_detail || "";
+  $("scenBtn").textContent = "Scripted scenario: " + (P.scenario_enabled ? "ON" : "OFF");
+  $("scenBtn").classList.toggle("on", !!P.scenario_enabled);
+
+  if(!touchedLink){
+    $("sBw").value=L.bw_mbps; $("lBw").textContent=(L.bw_mbps||0).toFixed(1)+" Mbps";
+    $("sDelay").value=L.delay_ms; $("lDelay").textContent=(L.delay_ms||0).toFixed(0)+" ms";
+    $("sLoss").value=L.loss_pct; $("lLoss").textContent=(L.loss_pct||0).toFixed(1)+" %";
+  }
+  if(!touchedEnc){
+    $("sAlpha").value=TH.ewma_alpha; $("lAlpha").textContent=(TH.ewma_alpha||0).toFixed(2);
+    $("sDown").value=TH.bw_switch_down_mbps;
+    $("lDown").textContent=TH.bw_switch_down_mbps.toFixed(2)+" Mbps";
+    $("sUp").value=TH.bw_switch_up_mbps;
+    $("lUp").textContent=TH.bw_switch_up_mbps.toFixed(2)+" Mbps";
+  }
+
+  history.push({t:t.ts, bw:t.sample.bw_mbps, ewma:t.ewma.bw_mbps, mode:t.mode});
+  while(history.length>MAXPTS) history.shift();
+  drawChart();
+  applyKpis(t.kpis||{});
+}
+
+function drawMeter(pre, value, lo, hi, max){
+  const pct = v => Math.max(0, Math.min(100, v/max*100));
+  $(pre+"Fill").style.width  = pct(value)+"%";
+  $(pre+"Needle").style.left = pct(value)+"%";
+  const b = $(pre+"Band");
+  b.style.left = pct(lo)+"%";
+  b.style.width = Math.max(pct(hi)-pct(lo), 0.6)+"%";
+}
+
+function applyKpis(k){
+  $("kSave").textContent  = (k.bandwidth_saved_pct ?? 0).toFixed(1)+" %";
+  $("kTrans").textContent = k.avg_transition_latency_ms!=null
+                            ? (k.avg_transition_latency_ms/1000).toFixed(2)+" s" : "—";
+  $("kFlap").textContent  = (k.flap_rate_per_hour ?? 0).toFixed(1);
+  $("kE2e").textContent   = (k.median_e2e_ms ?? 0).toFixed(0)+" ms";
+  $("kInfer").textContent = (k.avg_infer_ms ?? 0).toFixed(1)+" ms";
+  $("kAvgP").textContent  = fmtBytes(k.avg_payload_bytes ?? 0);
+  $("kSwitch").textContent= k.mode_transitions ?? 0;
+
+  $("tFrames").textContent = k.frames ?? 0;
+  $("tDet").textContent    = k.detections ?? 0;
+  $("tDeliv").textContent  = k.payloads_delivered ?? 0;
+  $("tDrop").textContent   = k.payloads_dropped ?? 0;
+  $("tHigh").textContent   = fmtBytes(k.bytes_sent_high ?? 0);
+  $("tLow").textContent    = fmtBytes(k.bytes_sent_low ?? 0);
+  $("tSent").textContent   = fmtBytes(k.bytes_sent ?? 0);
+  $("tBase").textContent   = fmtBytes(k.baseline_bytes ?? 0);
+  const s = k.elapsed_s ?? 0;
+  $("tUp").textContent = `${Math.floor(s/60)}m ${Math.floor(s%60)}s`;
+}
+
+/* ── chart ────────────────────────────────────────────────── */
+const cv = $("chart"), ctx = cv.getContext("2d");
+function drawChart(){
+  const dpr = window.devicePixelRatio || 1;
+  const w = cv.clientWidth, h = cv.clientHeight;
+  cv.width = w*dpr; cv.height = h*dpr;
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+  ctx.clearRect(0,0,w,h);
+
+  const pad = {l:42, r:12, t:12, b:20};
+  const W = w-pad.l-pad.r, H = h-pad.t-pad.b;
+  const maxY = Math.max(2, TH.bw_switch_up_mbps*1.6,
+                        ...history.map(p=>Math.max(p.bw,p.ewma))) * 1.1;
+  const X = i => pad.l + (history.length<2 ? W : i/(history.length-1)*W);
+  const Y = v => pad.t + H - Math.min(v/maxY,1)*H;
+
+  // LOW-mode shading
+  ctx.fillStyle = "rgba(255,180,84,.13)";
+  let runStart = null;
+  history.forEach((p,i)=>{
+    if(p.mode==="low" && runStart===null) runStart = i;
+    if((p.mode!=="low" || i===history.length-1) && runStart!==null){
+      const x0=X(runStart), x1=X(i);
+      ctx.fillRect(x0, pad.t, Math.max(x1-x0,1.5), H);
+      runStart = null;
+    }
+  });
+
+  // grid + y labels
+  ctx.strokeStyle="rgba(255,255,255,.06)"; ctx.fillStyle="#5d6f86";
+  ctx.font="10px ui-monospace,monospace"; ctx.textAlign="right";
+  for(let g=0; g<=4; g++){
+    const v = maxY*g/4, y = Y(v);
+    ctx.beginPath(); ctx.moveTo(pad.l,y); ctx.lineTo(w-pad.r,y); ctx.stroke();
+    ctx.fillText(v.toFixed(1), pad.l-6, y+3);
+  }
+
+  // thresholds
+  const line = (v,color)=>{
+    ctx.save(); ctx.strokeStyle=color; ctx.setLineDash([5,4]); ctx.lineWidth=1.2;
+    ctx.beginPath(); ctx.moveTo(pad.l,Y(v)); ctx.lineTo(w-pad.r,Y(v)); ctx.stroke();
+    ctx.restore();
+  };
+  line(TH.bw_switch_up_mbps, "#3ddc97");
+  line(TH.bw_switch_down_mbps, "#ffb454");
+
+  if(history.length<2){
+    ctx.fillStyle="#5d6f86"; ctx.textAlign="center";
+    ctx.fillText("collecting telemetry…", w/2, h/2);
+    return;
+  }
+
+  const series = (key,color,width,alpha)=>{
+    ctx.save(); ctx.globalAlpha=alpha; ctx.strokeStyle=color; ctx.lineWidth=width;
+    ctx.lineJoin="round"; ctx.beginPath();
+    history.forEach((p,i)=> i ? ctx.lineTo(X(i),Y(p[key])) : ctx.moveTo(X(i),Y(p[key])));
+    ctx.stroke(); ctx.restore();
+  };
+  series("bw", "#4aa8ff", 1.4, .65);
+  series("ewma", "#ffffff", 2, 1);
+
+  ctx.fillStyle="#5d6f86"; ctx.textAlign="left";
+  ctx.fillText("Mbps", pad.l, h-6);
+  ctx.textAlign="right";
+  ctx.fillText(`last ${history.length} samples`, w-pad.r, h-6);
+}
+window.addEventListener("resize", drawChart);
+
+/* ── event feed ───────────────────────────────────────────── */
+let feedCount = 0;
+function addEvent(rec, prepend){
+  const feed = $("feed");
+  const empty = feed.querySelector(".empty");
+  if(empty) empty.remove();
+
+  const p = rec.payload, mode = p.mode;
+  const el = document.createElement("div");
+  el.className = "ev "+mode;
+
+  const img = p.thumbnail
+    ? `<img class="thumb" src="data:image/jpeg;base64,${p.thumbnail}" alt="ROI">`
+    : `<div class="noimg">IMAGE<br>SUPPRESSED<br>(LOW MODE)</div>`;
+
+  const t = new Date(p.ts).toLocaleTimeString();
+  el.innerHTML = `
+    ${img}
+    <div class="meta">
+      <div class="row1">
+        <span class="tag ${mode}">${mode}</span>
+        <span class="title">${p.event.replace(/_/g," ")}</span>
+        <span class="tag">${p.label}</span>
+      </div>
+      <div class="facts">
+        <span>conf ${(p.conf*100).toFixed(0)}%</span>
+        <span>bbox ${p.bbox.join(",")}</span>
+        <span>${rec.meta.bytes} B</span>
+        <span>link ${rec.meta.link_delay_ms} ms</span>
+        <span>e2e ${rec.e2e_ms} ms</span>
+        <span>${p.camera} · ${t}</span>
+      </div>
+    </div>`;
+
+  if(prepend) feed.prepend(el); else feed.appendChild(el);
+  while(feed.children.length > 60) feed.lastChild.remove();
+  $("feedCount").textContent = `· ${++feedCount} received`;
+}
+
+/* ── controls ─────────────────────────────────────────────── */
+const post = (url, body) => fetch(url, {
+  method:"POST", headers:{"Content-Type":"application/json"},
+  body: JSON.stringify(body||{})
+}).then(r=>r.json());
+
+document.querySelectorAll("#presets button").forEach(b=>{
+  b.onclick = () => { touchedLink=false; post("/api/link/preset/"+b.dataset.p); };
+});
+
+function pushLink(){
+  touchedLink = true;
+  post("/api/link/custom", {
+    bw_mbps:+$("sBw").value, delay_ms:+$("sDelay").value,
+    jitter_ms:Math.max(+$("sDelay").value*0.15, 2), loss_pct:+$("sLoss").value,
+    label:"manual override"
+  });
+}
+$("sBw").oninput   = e => { $("lBw").textContent=(+e.target.value).toFixed(1)+" Mbps"; pushLink(); };
+$("sDelay").oninput= e => { $("lDelay").textContent=(+e.target.value).toFixed(0)+" ms"; pushLink(); };
+$("sLoss").oninput = e => { $("lLoss").textContent=(+e.target.value).toFixed(1)+" %"; pushLink(); };
+
+function pushEnc(){
+  touchedEnc = true;
+  post("/api/encoder/tune", {
+    ewma_alpha:+$("sAlpha").value,
+    bw_switch_down_mbps:+$("sDown").value,
+    bw_switch_up_mbps:+$("sUp").value
+  });
+}
+$("sAlpha").oninput= e => { $("lAlpha").textContent=(+e.target.value).toFixed(2); pushEnc(); };
+$("sDown").oninput = e => { $("lDown").textContent=(+e.target.value).toFixed(2)+" Mbps"; pushEnc(); };
+$("sUp").oninput   = e => { $("lUp").textContent=(+e.target.value).toFixed(2)+" Mbps"; pushEnc(); };
+
+$("scenBtn").onclick = () => {
+  const on = $("scenBtn").classList.contains("on");
+  touchedLink = false;
+  post("/api/scenario/" + (on ? "stop" : "start"));
+};
+$("resetBtn").onclick = () => {
+  history.length = 0; feedCount = 0;
+  $("feed").innerHTML = '<div class="empty">KPIs reset — waiting for detections…</div>';
+  post("/api/pipeline/reset-metrics");
+};
+$("reportBtn").onclick = () => post("/api/report").then(r=>{
+  $("reportNote").textContent = "Saved: " + r.path;
+});
+</script>
+</body>
+</html>
