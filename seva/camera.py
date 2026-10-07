@@ -43,13 +43,14 @@ class FileCamera(BaseCamera):
     kind = "file"
 
     def __init__(self, source: str, loop: bool = True, reconnect_delay_s: float = 2.0,
-                 camera_id: str = "CAM-01"):
+                 camera_id: str = "CAM-01", start_offset_s: float = 0.0):
         if cv2 is None:
             raise RuntimeError("OpenCV is required for FileCamera")
         self.source = source
         self.loop = loop
         self.reconnect_delay_s = reconnect_delay_s
         self.camera_id = camera_id
+        self.start_offset_s = float(start_offset_s)
         self.reconnects = 0
         self.cap = None
         self._open()
@@ -60,6 +61,10 @@ class FileCamera(BaseCamera):
         self.cap = cv2.VideoCapture(self.source)
         if not self.cap.isOpened():
             raise RuntimeError(f"cannot open camera source: {self.source}")
+        frame_count = self.cap.get(cv2.CAP_PROP_FRAME_COUNT)
+        fps = self.cap.get(cv2.CAP_PROP_FPS)
+        if frame_count > 0 and fps > 0 and self.start_offset_s:
+            self.cap.set(cv2.CAP_PROP_POS_FRAMES, int(self.start_offset_s * fps) % int(frame_count))
 
     def read(self):
         ok, frame = self.cap.read()
@@ -149,28 +154,49 @@ class SyntheticCamera(BaseCamera):
         return frame
 
 
-def build_camera(cfg: dict, root: Path) -> BaseCamera:
+def build_camera(cfg: dict, root: Path, index: int = 0) -> BaseCamera:
     """Pick a camera source from config, falling back to synthetic."""
     source = str(cfg.get("source", "auto"))
     loop = bool(cfg.get("loop", True))
     delay = float(cfg.get("reconnect_delay_s", 2.0))
+    camera_id = f"CAM-{index + 1:02d}"
+    seed = int(cfg.get("seed", 11)) + index
+    offset = index * float(cfg.get("reuse_offset_s", 7.0))
 
     if source == "synthetic" or cv2 is None:
-        return SyntheticCamera()
+        return SyntheticCamera(camera_id, seed)
 
     if source == "auto":
         clips = sorted(p for ext in ("*.mp4", "*.avi", "*.mov", "*.mkv")
                        for p in (root / "data" / "videos").glob(ext))
         if not clips:
-            return SyntheticCamera()
+            return SyntheticCamera(camera_id, seed)
         # Prefer a clip containing both people and vehicles, so the feed
         # exercises intrusion *and* traffic events rather than one class.
         source = str(next(
             (c for c in clips if "person-bicycle-car" in c.name),
             next((c for c in clips if "person" in c.name), clips[0]),
         ))
+        # Preserve the preferred legacy source for camera one, then use other
+        # clips before cycling back to an already-used source with an offset.
+        ordered = [Path(source)] + [clip for clip in clips if str(clip) != source]
+        source = str(ordered[index % len(ordered)])
+        offset = (index // len(ordered)) * float(cfg.get("reuse_offset_s", 7.0))
+
+    if source not in ("auto", "synthetic"):
+        path = Path(source)
+        if not path.is_absolute() and (root / path).exists():
+            source = str(root / path)
 
     try:
-        return FileCamera(source, loop=loop, reconnect_delay_s=delay)
+        return FileCamera(source, loop=loop, reconnect_delay_s=delay,
+                          camera_id=camera_id, start_offset_s=offset)
     except RuntimeError:
-        return SyntheticCamera()
+        return SyntheticCamera(camera_id, seed)
+
+
+def build_cameras(cfg: dict, root: Path) -> list[BaseCamera]:
+    count = int(cfg.get("count", 1))
+    if count < 1:
+        raise ValueError("camera.count must be at least one")
+    return [build_camera(cfg, root, index) for index in range(count)]

@@ -50,6 +50,11 @@ async def trial(cfg, duration_s: float, tag: str) -> dict:
     out = ROOT / cfg.get_path("run.results_dir", "results") / \
         f"trial_{tag}_{time.strftime('%Y%m%d_%H%M%S')}.json"
     node.metrics.export(out)
+    import json
+    report = json.loads(out.read_text(encoding="utf-8"))
+    report["configuration"] = dict(cfg)
+    report["pipeline"] = node.telemetry_snapshot()["pipeline"]
+    out.write_text(json.dumps(report, indent=2), encoding="utf-8")
     return {"kpis": node.metrics.summary(), "path": out,
             "transitions": node.metrics.transitions}
 
@@ -59,10 +64,18 @@ def print_report(result: dict) -> None:
     rows = [
         ("Bandwidth saved vs full-frame streaming", f"{k['bandwidth_saved_pct']:.2f} %"),
         ("Total bytes transmitted", f"{k['bytes_sent']:,} B"),
+        ("  in RICH mode", f"{k['bytes_sent_rich']:,} B"),
         ("  in HIGH mode", f"{k['bytes_sent_high']:,} B"),
         ("  in LOW mode", f"{k['bytes_sent_low']:,} B"),
         ("Full-frame streaming baseline", f"{k['baseline_bytes']:,} B"),
         ("Average payload size", f"{k['avg_payload_bytes']:.0f} B"),
+        *[(f"Average payload — {mode.upper()}", f"{size:.0f} B")
+          for mode, size in k["avg_payload_bytes_by_mode"].items()],
+        *[(f"Time in {mode.upper()}", f"{seconds:.2f} s")
+          for mode, seconds in k["mode_time_s"].items()],
+        ("RICH transition latency", f"{k['avg_rich_transition_latency_ms']:.0f} ms"
+         if k["avg_rich_transition_latency_ms"] is not None else "n/a"),
+        ("Queue overflow drops", str(k["queue_drops"])),
         ("", ""),
         ("Mode transitions", str(k["mode_transitions"])),
         ("Mode-flap rate", f"{k['flap_rate_per_hour']:.2f} / hour"),
@@ -77,6 +90,9 @@ def print_report(result: dict) -> None:
         ("Payloads delivered / lost",
          f"{k['payloads_delivered']} / {k['payloads_dropped']}"),
     ]
+    for camera_id, camera in k["per_camera"].items():
+        rows.append((camera_id, f"{camera['frames']} frames, {camera['payloads_delivered']} delivered, "
+                     f"{camera['bandwidth_saved_pct']:.2f}% saved"))
     width = max(len(a) for a, _ in rows)
     print("\n" + "=" * (width + 24))
     print("  SEVA-Net trial results (PRD section 13 KPIs)")
@@ -103,9 +119,21 @@ def main() -> None:
     ap.add_argument("--duration", type=float, default=120.0)
     ap.add_argument("--config", default=None)
     ap.add_argument("--tag", default="default")
+    ap.add_argument("--preset", default=None, help="hold a configured link preset; disable timeline")
+    ap.add_argument("--cameras", type=int, default=None, help="override camera.count for this trial")
     args = ap.parse_args()
 
     cfg = load_config(args.config)
+    if args.preset:
+        preset = cfg.get_path("link.presets", {}).get(args.preset)
+        if preset is None:
+            ap.error(f"unknown configured preset: {args.preset}")
+        cfg["link"]["scenario"] = [dict(at_s=0, **preset)]
+        cfg["link"]["loop_scenario"] = False
+    if args.cameras is not None:
+        if args.cameras < 1:
+            ap.error("--cameras must be at least one")
+        cfg["camera"]["count"] = args.cameras
     result = asyncio.run(trial(cfg, args.duration, args.tag))
     print_report(result)
 

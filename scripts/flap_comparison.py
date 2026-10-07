@@ -11,6 +11,7 @@ that DNA-SE does what section 10.2 claims.
 from __future__ import annotations
 
 import argparse
+import json
 import random
 import sys
 import time
@@ -80,32 +81,54 @@ def main() -> None:
 
     trace = make_trace(args.samples, centre, args.sigma, args.seed)
 
-    rows = [
-        ("Naive single threshold (no smoothing, no hysteresis)",
-         count_naive(trace, centre)),
-        (f"EWMA only (alpha={alpha}), single threshold",
-         count_ewma_only(trace, centre, alpha)),
-        (f"DNA-SE: EWMA + hysteresis band {down:.2f}-{up:.2f} Mbps",
-         count_dna_se(trace, cfg)),
-    ]
+    def compare(values):
+        # The naive and EWMA traces use HIGH/RICH when testing the upper band.
+        # Only the number of changes matters for these stationary comparisons.
+        local = load_config(args.config)
+        local["encoder"]["min_hold_s"] = 0.0
+        encoder = SemanticEncoder(local["encoder"], local["payload"])
+        for i, bw in enumerate(values):
+            encoder.update(QoSSample(time.time() + i, bw, 30.0, 0.0))
+        by_edge = {"low_high": 0, "high_rich": 0}
+        for change in encoder.transitions:
+            if "low" in (change["from"], change["to"]):
+                by_edge["low_high"] += 1
+            if "rich" in (change["from"], change["to"]):
+                by_edge["high_rich"] += 1
+        def ladder_changes(smoothing=False):
+            ewma, mode, changes = EWMA(alpha), "high", 0
+            for value in values:
+                bw = ewma.update(value) if smoothing else value
+                target = "rich" if bw > rich_centre else "high" if bw > centre else "low"
+                if target != mode:
+                    changes += 1
+                    mode = target
+            return changes
+        return {"naive": ladder_changes(), "ewma_only": ladder_changes(True),
+                "dna_se": len(encoder.transitions), "changes_by_edge": by_edge}
 
-    width = max(len(a) for a, _ in rows)
-    print()
-    print("  Flap-rate comparison (NFR-3)")
-    print(f"  {args.samples} samples, noise sigma={args.sigma} Mbps "
-          f"centred on {centre:.2f} Mbps (mid-band)")
-    print("  " + "-" * (width + 16))
-    for label, flips in rows:
-        print(f"  {label:<{width}}  {flips:>5}")
-    print("  " + "-" * (width + 16))
-
-    naive, dnase = rows[0][1], rows[2][1]
-    if dnase:
-        print(f"  DNA-SE reduces mode oscillation {naive/dnase:.1f}x "
-              f"vs. naive thresholding.")
-    else:
-        print("  DNA-SE eliminated flapping entirely on this trace.")
-    print()
+    rich_down = float(enc_cfg["rich_bw_switch_down_mbps"])
+    rich_up = float(enc_cfg["rich_bw_switch_up_mbps"])
+    rich_centre = (rich_down + rich_up) / 2
+    rich_trace = make_trace(args.samples, rich_centre, args.sigma, args.seed)
+    low_result = compare(trace)
+    rich_result = compare(rich_trace)
+    total = {key: low_result[key] + rich_result[key]
+             for key in ("naive", "ewma_only", "dna_se")}
+    print(f"\nFlap comparison: {args.samples} samples per band, sigma={args.sigma}, seed={args.seed}")
+    print("Dwell disabled here to isolate smoothing/hysteresis; production dwell stays enabled.")
+    print(f"{'Band / ladder':<30} {'Naive':>8} {'EWMA':>8} {'DNA-SE':>8}")
+    for name, result in ((f"LOW/HIGH {down:g}-{up:g}", low_result),
+                         (f"HIGH/RICH {rich_down:g}-{rich_up:g}", rich_result),
+                         ("Three-tier total (two traces)", total)):
+        print(f"{name:<30} {result['naive']:>8} {result['ewma_only']:>8} {result['dna_se']:>8}")
+    out = ROOT / cfg.get_path("run.results_dir", "results") / "flap_comparison.json"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps({"samples_per_band": args.samples, "sigma": args.sigma,
+                              "seed": args.seed, "dwell_disabled": True,
+                              "low_high": low_result, "high_rich": rich_result,
+                              "three_tier_total": total}, indent=2), encoding="utf-8")
+    print(f"Report: {out}\n")
 
 
 if __name__ == "__main__":

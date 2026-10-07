@@ -43,11 +43,10 @@ class QoSProbe:
     async def _throughput(self) -> float:
         """Sustained-throughput probe.
 
-        An idle link holds burst credit, so timing a single cold transfer
-        reports far more than the link can sustain. iperf3 solves this by
-        discarding the opening interval; the same trick here: a warm-up
-        transfer drains the credit, then the timed transfer measures the
-        steady-state rate.
+        The link discards burst credit for this probe and returns the sum of
+        serialization time and time queued behind camera payloads. Throughput
+        therefore falls under shared-link contention. Propagation is measured
+        separately by the RTT probe.
         """
         result = await self.link.saturating_transfer(self.probe_bytes)
         self.sent += 1

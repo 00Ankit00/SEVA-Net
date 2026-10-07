@@ -122,6 +122,8 @@ def build_detector(cfg: dict) -> BaseDetector:
 
     if backend in ("auto", "yolo"):
         try:
+            if backend == "auto" and not Path(resolve_weights(cfg.get("weights", "yolov8n.pt"))).is_file():
+                raise FileNotFoundError("local YOLO weights missing; use fetch_assets.py explicitly")
             return YoloDetector(
                 weights=resolve_weights(cfg.get("weights", "yolov8n.pt")),
                 conf=conf,
@@ -166,3 +168,23 @@ def encode_full_frame(frame, quality: int) -> int:
         return 0
     ok, buf = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), int(quality)])
     return int(buf.nbytes) if ok else 0
+
+
+def encode_keyframe(frame, detections: list[dict], max_px: int, quality: int) -> bytes | None:
+    """Downscale and annotate a copy at the edge; transmit only the encoded JPEG."""
+    if cv2 is None or frame is None:
+        return None
+    h, w = frame.shape[:2]
+    scale = min(max_px / max(h, w), 1.0)
+    image = cv2.resize(frame, (max(1, int(w * scale)), max(1, int(h * scale))),
+                       interpolation=cv2.INTER_AREA) if scale < 1 else frame.copy()
+    for detection in detections:
+        x, y, bw, bh = detection["bbox"]
+        start = (int(x * scale), int(y * scale))
+        end = (int((x + bw) * scale), int((y + bh) * scale))
+        cv2.rectangle(image, start, end, (80, 230, 110), 1)
+        label = f"{detection['label']} {detection['conf']:.0%}"
+        cv2.putText(image, label, (start[0], max(start[1] - 4, 12)),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.4, (80, 230, 110), 1, cv2.LINE_AA)
+    ok, buf = cv2.imencode(".jpg", image, [int(cv2.IMWRITE_JPEG_QUALITY), int(quality)])
+    return buf.tobytes() if ok else None

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import math
 import time
 from collections import deque
 from pathlib import Path
@@ -22,16 +23,6 @@ from ..link import LinkProfile
 
 ROOT = Path(__file__).resolve().parent.parent.parent
 STATIC = Path(__file__).resolve().parent / "static"
-
-# Named link conditions the dashboard buttons can apply on demand.
-PRESETS = {
-    "healthy":  LinkProfile(8.0, 18, 4, 0.0, "Healthy backhaul"),
-    "peak":     LinkProfile(2.6, 45, 10, 0.3, "Peak-hour load"),
-    "degraded": LinkProfile(0.9, 140, 30, 1.5, "Degraded uplink"),
-    "collapse": LinkProfile(0.35, 220, 45, 4.0, "Congestion collapse"),
-    "noisy":    LinkProfile(1.6, 130, 60, 1.5, "Noisy band (flap test)"),
-}
-
 
 class Hub:
     """Fan-out to every connected dashboard."""
@@ -62,10 +53,13 @@ class Hub:
 
 def create_app(config_path: str | None = None) -> FastAPI:
     cfg = load_config(config_path)
+    presets = {name: LinkProfile(**profile)
+               for name, profile in cfg.get_path("link.presets", {}).items()}
     app = FastAPI(title="SEVA-Net Cloud Dashboard", version="0.1.0")
 
     hub = Hub()
     events: deque[dict] = deque(maxlen=int(cfg.get_path("cloud.max_events", 400)))
+    alerts: deque[dict] = deque(maxlen=int(cfg.get_path("alerts.max_history", 200)))
     state: dict = {"node": None, "loop": None, "last_telemetry": None}
 
     # -- edge -> cloud ingest ---------------------------------------------
@@ -84,10 +78,17 @@ def create_app(config_path: str | None = None) -> FastAPI:
         state["last_telemetry"] = snapshot
         loop = state.get("loop")
         if loop is not None:
-            # Called from the pipeline; hand the send back to the event loop.
-            asyncio.run_coroutine_threadsafe(hub.broadcast(snapshot), loop)
+            loop.create_task(hub.broadcast(snapshot))
 
-    node = EdgeNode(cfg, ROOT, on_event=on_event, on_telemetry=on_telemetry)
+    def on_alert(alert: dict) -> None:
+        alerts.append(alert)
+        loop = state.get("loop")
+        if loop is not None:
+            loop.create_task(hub.broadcast(alert))
+
+    node = EdgeNode(cfg, ROOT, on_event=on_event, on_telemetry=on_telemetry,
+                    on_alert=on_alert)
+    app.state.node = node
     state["node"] = node
 
     # -- lifecycle ---------------------------------------------------------
@@ -117,8 +118,9 @@ def create_app(config_path: str | None = None) -> FastAPI:
             await ws.send_text(json.dumps({
                 "type": "snapshot",
                 "telemetry": state["last_telemetry"] or node.telemetry_snapshot(),
-                "events": list(events)[-60:],
-                "presets": {k: v.as_dict() for k, v in PRESETS.items()},
+                "events": list(events)[-int(cfg.get_path("dashboard.max_snapshot_events", 200)):],
+                "alerts": list(alerts),
+                "presets": {k: v.as_dict() for k, v in presets.items()},
             }))
             while True:
                 await ws.receive_text()   # keepalive; controls go over REST
@@ -140,10 +142,40 @@ def create_app(config_path: str | None = None) -> FastAPI:
     async def api_kpis() -> JSONResponse:
         return JSONResponse(node.metrics.summary())
 
+    @app.get("/api/alerts")
+    async def api_alerts(limit: int = 100) -> JSONResponse:
+        return JSONResponse({"alerts": list(alerts)[-max(1, min(limit, alerts.maxlen)):]})
+
+    @app.post("/api/alerts/tune")
+    async def tune_alerts(body: dict) -> JSONResponse:
+        allowed = {"enabled", "warning_enabled", "warning_margin", "auto_dismiss_s",
+                   "sound_enabled", "flash_duration_s", "max_toasts"}
+        candidate = dict(node.alerts.cfg)
+        candidate.update({k: v for k, v in body.items() if k in allowed})
+        try:
+            for key in ("enabled", "warning_enabled", "sound_enabled"):
+                if not isinstance(candidate.get(key, False), bool):
+                    raise ValueError(f"{key} must be boolean")
+            for key in ("warning_margin", "auto_dismiss_s", "flash_duration_s"):
+                candidate[key] = float(candidate[key])
+                if not math.isfinite(candidate[key]):
+                    raise ValueError(f"{key} must be finite")
+            if not 0 <= float(candidate["warning_margin"]) <= 1:
+                raise ValueError("warning_margin must be between 0 and 1")
+            if not 1 <= int(candidate["max_toasts"]) <= 3 or int(candidate["max_toasts"]) != float(candidate["max_toasts"]):
+                raise ValueError("max_toasts must be between 1 and 3")
+            candidate["max_toasts"] = int(candidate["max_toasts"])
+            if float(candidate["auto_dismiss_s"]) <= 0 or float(candidate["flash_duration_s"]) < 0:
+                raise ValueError("invalid toast or flash duration")
+        except (ValueError, TypeError, OverflowError) as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        node.alerts.cfg = candidate
+        return JSONResponse({"ok": True, "alerts_config": candidate})
+
     # -- REST: demo controls ----------------------------------------------
     @app.post("/api/link/preset/{name}")
     async def set_preset(name: str) -> JSONResponse:
-        profile = PRESETS.get(name)
+        profile = presets.get(name)
         if profile is None:
             return JSONResponse({"error": f"unknown preset {name}"}, status_code=404)
         # A manual override takes the link off the scripted timeline.
@@ -182,8 +214,32 @@ def create_app(config_path: str | None = None) -> FastAPI:
     @app.post("/api/encoder/tune")
     async def tune(body: dict) -> JSONResponse:
         """FR-10 / NFR-6: retune thresholds live, no restart."""
-        node.encoder.retune(**{k: v for k, v in body.items() if v is not None})
+        try:
+            node.encoder.retune(**{k: v for k, v in body.items() if v is not None})
+        except (ValueError, TypeError) as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
         return JSONResponse({"ok": True, "thresholds": node.encoder.thresholds})
+
+    @app.post("/api/payload/tune")
+    async def tune_payload(body: dict) -> JSONResponse:
+        candidate = dict(node.encoder.payload_cfg)
+        allowed = {"thumbnail_max_px", "thumbnail_jpeg_quality", "rich_thumbnail_max_px",
+                   "rich_thumbnail_jpeg_quality", "keyframe_max_px", "keyframe_jpeg_quality",
+                   "keyframe_every_n_events", "max_objects_per_frame", "max_pending_transmissions"}
+        try:
+            for key, value in body.items():
+                if key not in allowed:
+                    continue
+                number = int(value)
+                if number != float(value) or number < 1:
+                    raise ValueError(f"{key} must be a positive integer")
+                if key.endswith("quality") and number > 100:
+                    raise ValueError("JPEG quality must be <= 100")
+                candidate[key] = number
+        except (ValueError, TypeError, OverflowError) as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        node.encoder.payload_cfg = candidate
+        return JSONResponse({"ok": True, "payload_config": candidate})
 
     @app.post("/api/pipeline/{action}")
     async def pipeline(action: str) -> JSONResponse:
@@ -192,7 +248,7 @@ def create_app(config_path: str | None = None) -> FastAPI:
         elif action == "resume":
             node.paused = False
         elif action == "reset-metrics":
-            node.metrics.__init__()
+            node.metrics.__init__(start_mode=node.encoder.mode)
         else:
             return JSONResponse({"error": "unknown action"}, status_code=400)
         return JSONResponse({"ok": True, "paused": node.paused})

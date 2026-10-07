@@ -8,10 +8,11 @@
   :root{
     --bg:#0b0f14; --panel:#121821; --panel-2:#161e29; --line:#243040;
     --ink:#e6edf5; --muted:#8497ad; --dim:#5d6f86;
-    --high:#3ddc97; --low:#ffb454; --danger:#ff6b6b; --accent:#4aa8ff;
+    --high:#3ddc97; --low:#ffb454; --rich:#b99aff; --danger:#ff6b6b; --accent:#4aa8ff;
     --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
   }
   *{box-sizing:border-box}
+  [hidden]{display:none!important}
   body{margin:0;background:var(--bg);color:var(--ink);
        font:14px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif}
   a{color:var(--accent)}
@@ -34,11 +35,20 @@
                   letter-spacing:1px}
   .mode-chip .val{font:700 17px/1.1 var(--mono);color:var(--high)}
   .mode-chip.low .val{color:var(--low)}
+  .mode-chip.rich .val{color:var(--rich)}
+  .mode-chip.rich .dot{background:var(--rich);box-shadow:0 0 12px var(--rich)}
+  .ev.rich{border-left:3px solid var(--rich);flex-wrap:wrap}
+  .ev .tag.rich{color:var(--rich)}
+  .keyframe{max-width:100%;width:100%;height:auto;object-fit:contain;background:#080c12}
+  .rich-details{flex-basis:100%;font:11px var(--mono)}
+  .rich-details table{width:100%;border-collapse:collapse}
+  .rich-details td,.rich-details th{padding:4px;text-align:left;border-bottom:1px solid var(--line)}
   .mode-chip .sub{font-size:11px;color:var(--dim)}
 
-  main{display:grid;grid-template-columns:320px minmax(0,1fr) 300px;gap:16px;padding:16px;
+  main{display:grid;grid-template-columns:260px minmax(0,1fr) 260px;gap:16px;padding:16px;
        align-items:start}
-  @media(max-width:1250px){main{grid-template-columns:1fr}}
+  @media(max-width:1150px){main{grid-template-columns:240px minmax(0,1fr)}main>section:last-child{grid-column:1/-1;display:grid;grid-template-columns:1fr 1fr;gap:16px}}
+  @media(max-width:800px){main{grid-template-columns:1fr}main>section:last-child{display:block}main>section:nth-child(2){order:-1}}
 
   .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;
         margin-bottom:16px;overflow:hidden}
@@ -130,6 +140,54 @@
   .note{font-size:11px;color:var(--dim);line-height:1.5;margin-top:9px}
   .feed::-webkit-scrollbar{width:8px}
   .feed::-webkit-scrollbar-thumb{background:var(--line);border-radius:4px}
+  #toasts{position:fixed;right:18px;top:86px;z-index:20;display:grid;gap:8px;
+          width:min(380px,calc(100vw - 36px))}
+  .toast{padding:12px;background:var(--panel);border:1px solid var(--line);
+         border-left:4px solid var(--high);box-shadow:0 8px 24px #0008}
+  .toast.critical{border-left-color:var(--danger)}
+  .toast.warning{border-left-color:var(--low)}
+  .toast button{float:right;padding:5px 8px}
+  .toast p{margin:4px 0;font-size:12px}
+  .alert-entry{padding:9px 0;border-bottom:1px solid var(--line);font:11px var(--mono)}
+  .alert-entry.critical{color:var(--danger)}
+  .alert-entry.warning{color:var(--low)}
+  .alert-entry.info{color:var(--high)}
+  #alertHistory{max-height:240px;overflow:auto}
+  header.flash-critical{background:#582126;border-bottom-color:var(--danger)}
+  .wall-controls{display:flex;gap:8px;padding:10px;align-items:center;flex-wrap:wrap}
+  select{background:var(--panel-2);border:1px solid var(--line);padding:7px;color:var(--ink)}
+  .wall{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:2px;padding:2px;background:var(--line)}
+  .camera-tile{position:relative;background:#06090e;aspect-ratio:16/9;overflow:hidden;
+               border:1px solid #354252;cursor:pointer;font:10px var(--mono)}
+  .camera-tile:focus-visible{outline:2px solid var(--accent);outline-offset:-3px}
+  .camera-tile img{position:absolute;width:100%;height:100%;object-fit:contain;display:block}
+  .camera-tile.high img{width:auto;height:auto;max-width:55%;max-height:60%;left:50%;top:50%;transform:translate(-50%,-50%)}
+  .camera-tile canvas{position:absolute;width:100%;height:100%}
+  .camera-top,.camera-bottom{position:absolute;left:0;right:0;padding:6px 8px;background:#06090ecc;
+                            display:flex;justify-content:space-between;gap:6px;z-index:2}
+  .camera-top{top:0}.camera-bottom{bottom:0;flex-wrap:wrap}
+  .camera-label{color:#d3e1ec}.camera-time{color:#a6b6c9}
+  .rec{color:var(--danger);animation:recblink 1.5s steps(2,end) infinite}
+  @keyframes recblink{50%{opacity:.35}}
+  .tile-mode{color:var(--high)}.low .tile-mode{color:var(--low)}.rich .tile-mode{color:var(--rich)}
+  .camera-message{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+                   color:var(--low);letter-spacing:1px;pointer-events:none}
+  .camera-tile.stale{border-color:#814843}.camera-tile.stale img,.camera-tile.stale canvas{opacity:.2}
+  .camera-tile.stale .camera-message{color:var(--danger)}
+  .camera-tile.stale .rec{animation:none;color:var(--dim)}
+  .wall.focus{grid-template-columns:3fr 1fr;grid-template-rows:repeat(3,minmax(0,1fr))}
+  .wall.focus .camera-tile{aspect-ratio:auto;min-height:70px}
+  .wall.focus .camera-tile.selected{grid-column:1;grid-row:1/4;aspect-ratio:16/9}
+  .wall.focus .camera-tile:not(.selected){grid-column:2}
+  .wall.focus .camera-tile:not(.selected) .camera-time,.wall.focus .camera-tile:not(.selected) .tile-age{display:none}
+  .wall.single,.wall.expanded{grid-template-columns:1fr}
+  .wall.single .camera-tile:not(.selected),.wall.expanded .camera-tile:not(.selected){display:none}
+  .camera-kpis{padding:10px;overflow-x:auto;font:10px var(--mono)}
+  .camera-kpis table{width:100%;border-collapse:collapse;white-space:nowrap}
+  .camera-kpis th,.camera-kpis td{text-align:left;padding:6px;border-bottom:1px solid var(--line)}
+  .feed{max-height:300px}
+  .tuning-extra{margin-top:12px;font-size:12px;color:var(--muted)}
+  .tuning-extra input{width:100%;padding:6px;background:var(--bg);border:1px solid var(--line);color:var(--ink)}
 </style>
 </head>
 <body>
@@ -144,6 +202,7 @@
   <span class="badge" id="b-detector">detector —</span>
   <span class="badge" id="b-link">link —</span>
   <span class="badge" id="b-conn">connecting…</span>
+  <button id="muteBtn" aria-pressed="true">Sound: muted</button>
   <div class="mode-chip" id="modeChip">
     <div class="dot"></div>
     <div>
@@ -189,6 +248,7 @@
       <h2>Network conditions (link injection)</h2>
       <div class="body">
         <div class="btns" id="presets">
+          <button data-p="excellent">Excellent 20 Mbps</button>
           <button data-p="healthy">Healthy 8 Mbps</button>
           <button data-p="peak">Peak load</button>
           <button data-p="degraded">Degraded</button>
@@ -197,7 +257,7 @@
         </div>
         <div class="slider">
           <label>Bandwidth cap <b id="lBw">8.0 Mbps</b></label>
-          <input type="range" id="sBw" min="0.2" max="10" step="0.1" value="8">
+          <input type="range" id="sBw" min="0.2" max="25" step="0.1" value="8">
         </div>
         <div class="slider">
           <label>One-way delay <b id="lDelay">18 ms</b></label>
@@ -233,12 +293,26 @@
         </div>
         <p class="note">A wider band suppresses flapping but slows recovery.
         Changes apply live &mdash; no restart.</p>
+        <details class="tuning-extra"><summary>RICH, latency and dwell tuning</summary>
+          <div id="encoderExtra"></div><button id="applyExtra">Apply thresholds</button>
+        </details>
+        <p class="note" id="tuneError" role="status"></p>
       </div>
     </div>
   </section>
 
   <!-- ── centre: chart + event feed ── -->
   <section>
+    <div class="card">
+      <h2>Camera monitoring wall · shared backhaul</h2>
+      <div class="wall-controls">
+        <label>Layout <select id="wallLayout"><option value="grid">2×2 grid</option><option value="focus">1+3</option><option value="single">Single view</option></select></label>
+        <label>Camera <select id="wallCamera"></select></label>
+        <span class="note">Click a tile to expand / return</span>
+      </div>
+      <div class="wall" id="wall"></div>
+      <div class="camera-kpis" id="cameraKpis"></div>
+    </div>
     <div class="card">
       <h2>QoS telemetry &amp; mode timeline</h2>
       <canvas id="chart"></canvas>
@@ -247,6 +321,7 @@
         <span><i style="background:#fff"></i>EWMA</span>
         <span><i style="background:#3ddc97"></i>switch-up threshold</span>
         <span><i style="background:#ffb454"></i>switch-down threshold</span>
+        <span><i style="background:#b99aff"></i>RICH entry / exit</span>
         <span><i style="background:rgba(255,180,84,.35)"></i>LOW-mode periods</span>
       </div>
       <div class="body" style="padding-top:10px">
@@ -297,6 +372,10 @@
         <div class="kv"><span>Payloads delivered</span><span id="tDeliv">—</span></div>
         <div class="kv"><span>Payloads lost</span><span id="tDrop">—</span></div>
         <div class="kv"><span>Sent in HIGH</span><span id="tHigh">—</span></div>
+        <div class="kv"><span>Sent in RICH</span><span id="tRich">—</span></div>
+        <div class="kv"><span>Avg RICH payload</span><span id="tRichAvg">—</span></div>
+        <div class="kv"><span>Time LOW / HIGH / RICH</span><span id="tModeTime">—</span></div>
+        <div class="kv"><span>RICH switch latency</span><span id="tRichLatency">—</span></div>
         <div class="kv"><span>Sent in LOW</span><span id="tLow">—</span></div>
         <div class="kv"><span>Total transmitted</span><span id="tSent">—</span></div>
         <div class="kv"><span>Streaming baseline</span><span id="tBase">—</span></div>
@@ -309,6 +388,10 @@
     </div>
   </section>
 </main>
+<div id="toasts" aria-live="polite"></div>
+<section class="card" style="margin:0 16px 16px">
+  <h2>Alert history</h2><div class="body" id="alertHistory">No bandwidth alerts yet.</div>
+</section>
 
 <script>
 const $ = id => document.getElementById(id);
@@ -320,24 +403,172 @@ let TH = {bw_switch_down_mbps:1.2, bw_switch_up_mbps:2.0,
 const history = [];      // {t, bw, ewma, mode}
 const MAXPTS = 240;
 let touchedLink = false, touchedEnc = false;
+let dashboardConfig={}, wallMode="high", selectedCamera="CAM-01", expanded=false, layoutChosen=false;
+const cameraTiles=new Map();
+function ensureCameras(cameras){
+  cameras.forEach(camera=>{
+    let tile=cameraTiles.get(camera.camera_id);
+    if(!tile){
+      const el=document.createElement("div");el.className="camera-tile high";
+      el.tabIndex=0;el.setAttribute("role","button");el.setAttribute("aria-label",`Expand ${camera.camera_id}`);
+      const image=document.createElement("img");image.alt=`${camera.camera_id} received image`;image.hidden=true;
+      const canvas=document.createElement("canvas");
+      const top=document.createElement("div");top.className="camera-top";
+      const label=document.createElement("span");label.className="camera-label";label.textContent=camera.camera_id;
+      const clock=document.createElement("span");clock.className="camera-time";top.append(label,clock);
+      const bottom=document.createElement("div");bottom.className="camera-bottom";
+      const rec=document.createElement("span");rec.className="rec";rec.textContent="● REC";
+      const badge=document.createElement("span");badge.className="tile-mode";
+      const detection=document.createElement("span");detection.textContent="Waiting for detections";
+      const age=document.createElement("span");age.className="tile-age";
+      bottom.append(rec,badge,detection,age);
+      const message=document.createElement("div");message.className="camera-message";
+      el.append(image,canvas,top,bottom,message);$("wall").append(el);
+      const option=document.createElement("option");option.value=camera.camera_id;option.textContent=camera.camera_id;$("wallCamera").append(option);
+      tile={el,image,canvas,badge,detection,age,clock,message,info:camera,latest:null,
+            keyframe:null,thumbnail:null,keyframeTs:0,latestTs:0,boxes:[],count:0,received:0,created:Date.now()/1000};
+      cameraTiles.set(camera.camera_id,tile);
+      const select=()=>{if(expanded&&selectedCamera===camera.camera_id){expanded=false;}else{selectedCamera=camera.camera_id;expanded=true;}applyWallLayout();};
+      el.onclick=select;el.onkeydown=e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();select();}};
+    }
+    tile.info=camera;
+  });
+  if(!layoutChosen) $("wallLayout").value=dashboardConfig.default_layout||"grid";
+  applyWallLayout();refreshWall();
+}
+function applyWallLayout(){
+  $("wall").className="wall "+$("wallLayout").value+(expanded?" expanded":"");
+  $("wallCamera").value=selectedCamera;
+  cameraTiles.forEach((t,id)=>{
+    t.el.classList.toggle("selected",id===selectedCamera);
+    t.el.setAttribute("aria-label",`${expanded&&id===selectedCamera?"Return from":"Expand"} ${id}`);
+  });
+}
+$("wallLayout").onchange=()=>{layoutChosen=true;expanded=false;applyWallLayout();};
+$("wallCamera").onchange=()=>{selectedCamera=$("wallCamera").value;applyWallLayout();};
+function renderTile(tile){
+  tile.el.classList.remove("low","high","rich");tile.el.classList.add(wallMode);
+  tile.badge.textContent=wallMode.toUpperCase();
+  tile.canvas.hidden=wallMode!=="low";
+  const bytes=wallMode==="rich"?tile.keyframe:wallMode==="high"?tile.thumbnail:null;
+  tile.image.hidden=!bytes;
+  if(bytes){const src="data:image/jpeg;base64,"+bytes;if(tile.image.getAttribute("src")!==src) tile.image.src=src;}
+  else tile.image.removeAttribute("src");
+  if(wallMode==="low"){
+    const canvas=tile.canvas;canvas.width=tile.info.width||640;canvas.height=tile.info.height||360;
+    const context=canvas.getContext("2d");context.clearRect(0,0,canvas.width,canvas.height);
+    context.strokeStyle="#ffb454";context.lineWidth=2;
+    tile.boxes.forEach(b=>context.strokeRect(...b));
+  }
+  tile.message.textContent=wallMode==="low"?"IMAGE SUPPRESSED":bytes?"":"WAITING FOR RECEIVED IMAGE";
+}
+function receiveCameraEvent(rec,countEvent){
+  const p=rec.payload,id=p.camera_id||p.camera;
+  if(!cameraTiles.has(id)) ensureCameras([{camera_id:id,width:640,height:360}]);
+  const tile=cameraTiles.get(id), ts=p.detect_ts||Date.parse(p.ts)/1000;
+  if(countEvent) tile.count++;
+  tile.received=Math.max(tile.received,rec.meta.received_ts||Date.now()/1000);
+  if(p.thumbnail&&ts>=tile.latestTs) tile.thumbnail=p.thumbnail;
+  if(p.keyframe&&ts>=tile.keyframeTs){tile.keyframe=p.keyframe;tile.keyframeTs=ts;}
+  if(ts>=tile.latestTs){
+    if(ts>tile.latestTs) tile.boxes=[];
+    tile.latestTs=ts;tile.latest=p;
+    tile.boxes.push(p.bbox);
+    tile.detection.textContent=`${p.label} ${(p.conf*100).toFixed(0)}%`;
+  }
+  renderTile(tile);refreshWall();
+}
+function refreshWall(){
+  const now=Date.now()/1000;
+  cameraTiles.forEach(tile=>{
+    const age=Math.max(0,now-(tile.received||tile.created));
+    tile.clock.textContent=new Date().toLocaleTimeString();
+    tile.age.textContent=`${tile.count} events · ${tile.received?Math.floor(age)+" s ago":"no events"}`;
+    const stale=age>(dashboardConfig.no_signal_s||8);
+    tile.el.classList.toggle("stale",stale);
+    if(stale) tile.message.textContent="NO SIGNAL";else renderTile(tile);
+  });
+}
+let lastWallClock=0;
+setInterval(()=>{const now=Date.now();if(now-lastWallClock>=(dashboardConfig.clock_interval_s||1)*1000){refreshWall();lastWallClock=now;}},250);
+const extraKeys=["rich_bw_switch_down_mbps","rich_bw_switch_up_mbps","rich_lat_switch_up_ms",
+                 "rich_lat_switch_down_ms","lat_switch_up_ms","lat_switch_down_ms","min_hold_s"];
+extraKeys.forEach(key=>{const label=document.createElement("label");label.textContent=key.replace(/_/g," ");
+  const input=document.createElement("input");input.type="number";input.step="0.1";input.id="extra-"+key;
+  input.oninput=()=>touchedEnc=true;label.append(input);$("encoderExtra").append(label);});
+let alertConfig = {}, muted = true, soundChosen = false, audioContext;
+const alertRecords = [], pendingToasts = [];
+function beep(){
+  if(muted) return;
+  try{
+    audioContext ||= new (window.AudioContext || window.webkitAudioContext)();
+    audioContext.resume();
+    const oscillator=audioContext.createOscillator(), gain=audioContext.createGain();
+    oscillator.connect(gain); gain.connect(audioContext.destination);
+    oscillator.frequency.value=660; gain.gain.value=0.05;
+    oscillator.start(); oscillator.stop(audioContext.currentTime+0.12);
+  }catch(e){}
+}
+$("muteBtn").onclick=()=>{
+  soundChosen=true; muted=!muted;
+  $("muteBtn").textContent=muted?"Sound: muted":"Sound: on";
+  $("muteBtn").setAttribute("aria-pressed",String(muted)); beep();
+};
+function drainToasts(){
+  const host=$("toasts"), cap=Math.min(3,alertConfig.max_toasts||3);
+  while(pendingToasts.length && host.children.length<cap){
+    const a=pendingToasts.shift(), el=document.createElement("div");
+    el.className="toast "+a.level;
+    const close=document.createElement("button"); close.textContent="×";
+    close.setAttribute("aria-label","Dismiss alert");
+    const dismiss=()=>{el.remove();drainToasts();}; close.onclick=dismiss;
+    const title=document.createElement("strong"); title.textContent=a.level.toUpperCase();
+    const msg=document.createElement("p"); msg.textContent=a.message;
+    const detail=document.createElement("p");
+    detail.textContent=`${a.reason} · ${a.ewma_bw.toFixed(2)} Mbps / ${a.ewma_lat.toFixed(0)} ms`;
+    el.append(close,title,msg,detail);host.append(el);
+    if(a.level!=="critical") setTimeout(dismiss,(alertConfig.auto_dismiss_s||6)*1000);
+  }
+}
+function addAlert(a,notify){
+  alertRecords.push(a);
+  while(alertRecords.length>(alertConfig.max_history||200)) alertRecords.shift();
+  const panel=$("alertHistory"); panel.replaceChildren();
+  [...alertRecords].reverse().forEach(item=>{
+    const row=document.createElement("div");row.className="alert-entry "+item.level;
+    row.textContent=`${new Date(item.ts*1000).toLocaleTimeString()} · ${item.level.toUpperCase()} · ${item.message} · ${item.reason} · ${item.ewma_bw} Mbps / ${item.ewma_lat} ms`;
+    panel.append(row);
+  });
+  if(!notify) return;
+  pendingToasts.push(a);drainToasts();beep();
+  if(a.level==="critical"){
+    document.querySelector("header").classList.add("flash-critical");
+    setTimeout(()=>document.querySelector("header").classList.remove("flash-critical"),
+               (alertConfig.flash_duration_s??1)*1000);
+  }
+}
 
 /* ── websocket ────────────────────────────────────────────── */
-let ws, retry = 0;
+let ws, retry = 0, keepalive;
 function connect(){
   ws = new WebSocket((location.protocol==="https:"?"wss://":"ws://")+location.host+"/ws");
   ws.onopen = () => { retry=0; $("b-conn").textContent="live";
                       $("b-conn").style.color="var(--high)";
-                      setInterval(()=>{ if(ws.readyState===1) ws.send("ping"); },15000); };
-  ws.onclose = () => { $("b-conn").textContent="reconnecting…";
+                      clearInterval(keepalive);keepalive=setInterval(()=>{ if(ws.readyState===1) ws.send("ping"); },15000); };
+  ws.onclose = () => { clearInterval(keepalive); $("b-conn").textContent="reconnecting…";
                        $("b-conn").style.color="var(--low)";
                        setTimeout(connect, Math.min(1000*++retry, 5000)); };
   ws.onmessage = e => {
     const m = JSON.parse(e.data);
     if(m.type==="telemetry") applyTelemetry(m);
     else if(m.type==="event") addEvent(m, true);
+    else if(m.type==="alert") addAlert(m,true);
     else if(m.type==="snapshot"){
       if(m.telemetry) applyTelemetry(m.telemetry);
+      $("feed").replaceChildren();feedCount=0;
       (m.events||[]).forEach(ev => addEvent(ev,false));
+      alertRecords.length=0;
+      (m.alerts||[]).forEach(a=>addAlert(a,false));
     }
   };
 }
@@ -345,14 +576,24 @@ connect();
 
 /* ── telemetry ────────────────────────────────────────────── */
 function applyTelemetry(t){
+  dashboardConfig=t.dashboard_config||dashboardConfig;
+  wallMode=t.mode;
+  ensureCameras(t.pipeline?.cameras||[]);
+  alertConfig=t.alerts_config||alertConfig;
+  if(!soundChosen){
+    muted=!alertConfig.sound_enabled;
+    $("muteBtn").textContent=muted?"Sound: muted":"Sound: on";
+    $("muteBtn").setAttribute("aria-pressed",String(muted));
+  }
   TH = t.thresholds || TH;
   const low = t.mode === "low";
 
   const chip = $("modeChip");
   chip.classList.toggle("low", low);
+  chip.classList.toggle("rich", t.mode === "rich");
   $("modeVal").textContent = t.mode.toUpperCase();
   $("modeSub").textContent = low ? "JSON only — images dropped"
-                                 : "JSON + ROI thumbnail";
+                                 : t.mode === "rich" ? "Detections + ROI + keyframes" : "JSON + ROI thumbnail";
 
   $("mBw").textContent  = t.ewma.bw_mbps.toFixed(2)+" Mbps";
   $("mLat").textContent = t.ewma.lat_ms.toFixed(0)+" ms";
@@ -360,15 +601,15 @@ function applyTelemetry(t){
       `${t.sample.bw_mbps.toFixed(2)} Mbps / ${t.sample.lat_ms.toFixed(0)} ms`;
   $("alphaV").textContent = (TH.ewma_alpha||0).toFixed(2);
   $("bandV").textContent =
-      `${TH.bw_switch_down_mbps.toFixed(2)} – ${TH.bw_switch_up_mbps.toFixed(2)} Mbps`;
+      `${TH.bw_switch_down_mbps.toFixed(2)}–${TH.bw_switch_up_mbps.toFixed(2)} / ${TH.rich_bw_switch_down_mbps}–${TH.rich_bw_switch_up_mbps}`;
   $("reason").textContent = t.reason || "—";
 
   drawMeter("bw", t.ewma.bw_mbps, TH.bw_switch_down_mbps, TH.bw_switch_up_mbps,
-            Math.max(10, TH.bw_switch_up_mbps*2));
+            Math.max(25, TH.rich_bw_switch_up_mbps*1.5));
   drawMeter("lat", t.ewma.lat_ms, TH.lat_switch_up_ms, TH.lat_switch_down_ms,
             Math.max(300, TH.lat_switch_down_ms*1.8));
   $("bwMid").textContent = "band";
-  $("bwMax").textContent = Math.max(10, TH.bw_switch_up_mbps*2).toFixed(0)+" Mbps";
+  $("bwMax").textContent = Math.max(25, TH.rich_bw_switch_up_mbps*1.5).toFixed(0)+" Mbps";
   $("latMax").textContent = Math.max(300, TH.lat_switch_down_ms*1.8).toFixed(0)+" ms";
 
   const L = t.link || {};
@@ -391,6 +632,7 @@ function applyTelemetry(t){
     $("sLoss").value=L.loss_pct; $("lLoss").textContent=(L.loss_pct||0).toFixed(1)+" %";
   }
   if(!touchedEnc){
+    extraKeys.forEach(key=>$("extra-"+key).value=TH[key]??0);
     $("sAlpha").value=TH.ewma_alpha; $("lAlpha").textContent=(TH.ewma_alpha||0).toFixed(2);
     $("sDown").value=TH.bw_switch_down_mbps;
     $("lDown").textContent=TH.bw_switch_down_mbps.toFixed(2)+" Mbps";
@@ -399,7 +641,7 @@ function applyTelemetry(t){
   }
 
   history.push({t:t.ts, bw:t.sample.bw_mbps, ewma:t.ewma.bw_mbps, mode:t.mode});
-  while(history.length>MAXPTS) history.shift();
+  while(history.length>(dashboardConfig.chart_samples||MAXPTS)) history.shift();
   drawChart();
   applyKpis(t.kpis||{});
 }
@@ -414,6 +656,12 @@ function drawMeter(pre, value, lo, hi, max){
 }
 
 function applyKpis(k){
+  const table=document.createElement("table"),head=table.insertRow();
+  ["Camera","Frames","Events","Lost","Saved"].forEach(v=>{const c=document.createElement("th");c.textContent=v;head.append(c);});
+  Object.entries(k.per_camera||{}).forEach(([id,c])=>{
+    const row=table.insertRow();[id,c.frames,c.payloads_delivered,c.payloads_dropped+c.queue_drops,`${c.bandwidth_saved_pct.toFixed(1)}%`].forEach(v=>row.insertCell().textContent=v);
+    if(cameraTiles.has(id)) cameraTiles.get(id).count=c.payloads_delivered;
+  });$("cameraKpis").replaceChildren(table);
   $("kSave").textContent  = (k.bandwidth_saved_pct ?? 0).toFixed(1)+" %";
   $("kTrans").textContent = k.avg_transition_latency_ms!=null
                             ? (k.avg_transition_latency_ms/1000).toFixed(2)+" s" : "—";
@@ -428,6 +676,10 @@ function applyKpis(k){
   $("tDeliv").textContent  = k.payloads_delivered ?? 0;
   $("tDrop").textContent   = k.payloads_dropped ?? 0;
   $("tHigh").textContent   = fmtBytes(k.bytes_sent_high ?? 0);
+  $("tRich").textContent   = fmtBytes(k.bytes_sent_rich ?? 0);
+  $("tRichAvg").textContent= fmtBytes(k.avg_payload_bytes_by_mode?.rich ?? 0);
+  $("tModeTime").textContent=["low","high","rich"].map(m=>(k.mode_time_s?.[m]??0).toFixed(0)+"s").join(" / ");
+  $("tRichLatency").textContent=k.avg_rich_transition_latency_ms==null?"—":(k.avg_rich_transition_latency_ms/1000).toFixed(2)+" s";
   $("tLow").textContent    = fmtBytes(k.bytes_sent_low ?? 0);
   $("tSent").textContent   = fmtBytes(k.bytes_sent ?? 0);
   $("tBase").textContent   = fmtBytes(k.baseline_bytes ?? 0);
@@ -480,6 +732,8 @@ function drawChart(){
   };
   line(TH.bw_switch_up_mbps, "#3ddc97");
   line(TH.bw_switch_down_mbps, "#ffb454");
+  if(TH.rich_bw_switch_down_mbps) line(TH.rich_bw_switch_down_mbps,"#8d6ac8");
+  if(TH.rich_bw_switch_up_mbps) line(TH.rich_bw_switch_up_mbps,"#b99aff");
 
   if(history.length<2){
     ctx.fillStyle="#5d6f86"; ctx.textAlign="center";
@@ -506,6 +760,7 @@ window.addEventListener("resize", drawChart);
 /* ── event feed ───────────────────────────────────────────── */
 let feedCount = 0;
 function addEvent(rec, prepend){
+  receiveCameraEvent(rec,prepend);
   const feed = $("feed");
   const empty = feed.querySelector(".empty");
   if(empty) empty.remove();
@@ -514,7 +769,9 @@ function addEvent(rec, prepend){
   const el = document.createElement("div");
   el.className = "ev "+mode;
 
-  const img = p.thumbnail
+  const img = p.keyframe
+    ? `<img class="keyframe" src="data:image/jpeg;base64,${p.keyframe}" alt="Annotated keyframe">`
+    : p.thumbnail
     ? `<img class="thumb" src="data:image/jpeg;base64,${p.thumbnail}" alt="ROI">`
     : `<div class="noimg">IMAGE<br>SUPPRESSED<br>(LOW MODE)</div>`;
 
@@ -536,9 +793,20 @@ function addEvent(rec, prepend){
         <span>${p.camera} · ${t}</span>
       </div>
     </div>`;
+  if(mode==="rich"){
+    const details=document.createElement("div"); details.className="rich-details";
+    const counts=document.createElement("p");
+    counts.textContent="Counts: "+Object.entries(p.class_counts||{}).map(([key,value])=>`${key}: ${value}`).join(" · ");
+    const stats=document.createElement("p");
+    stats.textContent=`Frame ${p.edge_stats?.frame_index} · inference ${p.edge_stats?.inference_ms} ms · ${p.edge_stats?.camera_fps} FPS`;
+    const table=document.createElement("table");
+    const head=table.insertRow();["Class","Confidence","BBox [x,y,w,h]"].forEach(v=>{const cell=document.createElement("th");cell.textContent=v;head.append(cell);});
+    (p.detections||[]).forEach(d=>{const row=table.insertRow();[d.class,`${(d.conf*100).toFixed(0)}%`,d.bbox.join(",")].forEach(v=>row.insertCell().textContent=v);});
+    details.append(counts,stats,table);el.append(details);
+  }
 
   if(prepend) feed.prepend(el); else feed.appendChild(el);
-  while(feed.children.length > 60) feed.lastChild.remove();
+  while(feed.children.length > (dashboardConfig.max_feed_events||60)) feed.lastChild.remove();
   $("feedCount").textContent = `· ${++feedCount} received`;
 }
 
@@ -547,6 +815,13 @@ const post = (url, body) => fetch(url, {
   method:"POST", headers:{"Content-Type":"application/json"},
   body: JSON.stringify(body||{})
 }).then(r=>r.json());
+$("applyExtra").onclick=()=>{
+  const body=Object.fromEntries(extraKeys.map(key=>[key,+$("extra-"+key).value]));
+  post("/api/encoder/tune",body).then(result=>{
+    $("tuneError").textContent=result.error||"Thresholds applied";
+    if(result.ok) touchedEnc=false;
+  });
+};
 
 document.querySelectorAll("#presets button").forEach(b=>{
   b.onclick = () => { touchedLink=false; post("/api/link/preset/"+b.dataset.p); };
@@ -570,6 +845,9 @@ function pushEnc(){
     ewma_alpha:+$("sAlpha").value,
     bw_switch_down_mbps:+$("sDown").value,
     bw_switch_up_mbps:+$("sUp").value
+  }).then(result=>{
+    $("tuneError").textContent=result.error||"Thresholds applied";
+    if(result.ok) touchedEnc=false;
   });
 }
 $("sAlpha").oninput= e => { $("lAlpha").textContent=(+e.target.value).toFixed(2); pushEnc(); };

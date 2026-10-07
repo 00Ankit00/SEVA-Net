@@ -10,6 +10,9 @@ camera:
   loop: true
   sample_fps: 4.0         # FR-3: frame sampling rate
   reconnect_delay_s: 2.0  # FR-2: auto reconnect on stream drop
+  count: 4               # Cameras sharing one link/encoder; set 1 for legacy operation.
+  seed: 11               # Synthetic scene seed; camera index gives each a distinct scene.
+  reuse_offset_s: 7.0    # Playback offset between cameras that reuse the same video.
 
 detector:
   # FR-4. YOLOv8n if ultralytics is installed, else the deterministic
@@ -30,6 +33,10 @@ encoder:
   bw_switch_up_mbps: 2.00     # LOW  -> HIGH above this
   lat_switch_down_ms: 180.0   # HIGH -> LOW above this
   lat_switch_up_ms: 120.0     # LOW  -> HIGH below this
+  rich_bw_switch_up_mbps: 12.0    # HIGH -> RICH above this; keeps Healthy 8 Mbps HIGH.
+  rich_bw_switch_down_mbps: 10.0  # RICH -> HIGH below this.
+  rich_lat_switch_up_ms: 80.0     # RICH recovery also requires RTT below this.
+  rich_lat_switch_down_ms: 110.0  # RICH degrades if RTT rises above this.
   min_hold_s: 1.0             # minimum dwell in a mode before another switch
   start_mode: "high"
 
@@ -39,6 +46,13 @@ payload:
   thumbnail_jpeg_quality: 55
   max_objects_per_frame: 4
   baseline_jpeg_quality: 85 # full-frame baseline for the savings KPI (NFR-4)
+  rich_thumbnail_max_px: 240      # Longest edge of the higher-detail RICH ROI.
+  rich_thumbnail_jpeg_quality: 80 # JPEG quality for RICH ROI evidence.
+  keyframe_max_px: 640            # Annotated keyframe longest edge; never upscale.
+  keyframe_jpeg_quality: 65       # Keyframe compression quality.
+  keyframe_every_n_events: 8      # Send one keyframe per N RICH events per camera.
+  max_pending_transmissions: 256  # Bound all cameras' in-flight payload tasks together.
+  shutdown_drain_s: 3.0           # Allow queued transmissions to finish before shutdown.
 
 qos:
   # FR-6 / FR-7: active probing over the emulated link.
@@ -47,6 +61,15 @@ qos:
   ping_bytes: 64            # ICMP-style latency probe
 
 link:
+  burst_seconds: 0.05       # Maximum idle token credit on the shared backhaul.
+  # Presets configure physical link conditions; modes always follow QoS decisions.
+  presets:
+    excellent: {bw_mbps: 20.0, delay_ms: 10, jitter_ms: 2, loss_pct: 0.0, label: "Excellent backhaul"}
+    healthy: {bw_mbps: 8.0, delay_ms: 18, jitter_ms: 4, loss_pct: 0.0, label: "Healthy backhaul"}
+    peak: {bw_mbps: 2.6, delay_ms: 45, jitter_ms: 10, loss_pct: 0.3, label: "Peak-hour load"}
+    degraded: {bw_mbps: 0.9, delay_ms: 140, jitter_ms: 30, loss_pct: 1.5, label: "Degraded uplink"}
+    collapse: {bw_mbps: 0.35, delay_ms: 220, jitter_ms: 45, loss_pct: 4.0, label: "Congestion collapse"}
+    noisy: {bw_mbps: 1.6, delay_ms: 130, jitter_ms: 60, loss_pct: 1.5, label: "Noisy band (flap test)"}
   # Emulated camera->cloud backhaul. Stands in for the Mininet link on hosts
   # where Mininet cannot run (it is Linux-only). Same knobs, same semantics.
   initial:
@@ -63,12 +86,31 @@ link:
     - {at_s: 55,  bw_mbps: 0.5, delay_ms: 190, jitter_ms: 40, loss_pct: 3.0, label: "Congestion collapse"}
     - {at_s: 95,  bw_mbps: 1.6, delay_ms: 130, jitter_ms: 55, loss_pct: 1.5, label: "Noisy recovery (flap test)"}
     - {at_s: 130, bw_mbps: 7.0, delay_ms: 22,  jitter_ms: 5,  loss_pct: 0.0, label: "Backhaul restored"}
+    - {at_s: 145, bw_mbps: 20.0, delay_ms: 10, jitter_ms: 2, loss_pct: 0.0, label: "Excellent backhaul"}
   loop_scenario: true
 
 cloud:
   host: "127.0.0.1"
   port: 8000
   max_events: 400          # FR-16 in-memory history
+
+alerts:
+  enabled: true            # Broadcast encoder decisions as operator alerts.
+  warning_enabled: true    # Warn once when HIGH approaches the LOW bandwidth edge.
+  warning_margin: 0.15     # Fraction above the LOW switch-down bandwidth threshold.
+  auto_dismiss_s: 6.0      # INFO/WARNING toast lifetime; CRITICAL requires dismissal.
+  max_history: 200         # Bounded cloud alert history.
+  max_toasts: 3            # Maximum simultaneous toast pop-ups (at most three).
+  sound_enabled: false    # Initial beep setting; operator can unmute after interaction.
+  flash_duration_s: 1.0    # Duration of the CRITICAL header flash.
+
+dashboard:
+  no_signal_s: 8.0         # Camera tile becomes stale after this long without events.
+  default_layout: "grid"  # grid (2x2), focus (1+3), or single.
+  max_feed_events: 60      # Maximum rendered detection-event rows.
+  chart_samples: 240      # Maximum rendered QoS samples.
+  max_snapshot_events: 200 # Events replayed to a newly connected browser.
+  clock_interval_s: 1.0   # Wall clock and last-event age refresh period.
 
 run:
   duration_s: 0            # 0 = run until stopped

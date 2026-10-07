@@ -65,8 +65,10 @@ class EmulatedLink:
     # link cannot grant an unrealistic instantaneous burst.
     BURST_SECONDS = 0.05
 
-    def __init__(self, profile: LinkProfile, rng: random.Random | None = None):
+    def __init__(self, profile: LinkProfile, rng: random.Random | None = None,
+                 burst_seconds: float = 0.05):
         self.profile = profile
+        self.burst_seconds = float(burst_seconds)
         self._rng = rng or random.Random(1337)
         self._lock = asyncio.Lock()
         self._tokens = 0.0
@@ -94,66 +96,57 @@ class EmulatedLink:
         elapsed = now - self._last_refill
         self._last_refill = now
         rate = self.rate_bytes_s
-        self._tokens = min(self._tokens + elapsed * rate, rate * self.BURST_SECONDS)
+        self._tokens = min(self._tokens + elapsed * rate, rate * self.burst_seconds)
 
-    async def transmit(self, nbytes: int) -> Transmission:
-        """Send `nbytes` across the link, sleeping for the real elapsed time."""
+    @staticmethod
+    async def _delay(seconds: float) -> None:
+        """Never finish early on event loops with a coarse monotonic clock.
+
+        Windows asyncio can schedule sub-tick timers early while other tasks
+        keep the loop busy. Check elapsed high-resolution time and finish any
+        remaining wait off the event loop, preserving real propagation delay.
+        """
+        deadline = time.perf_counter() + seconds
+        await asyncio.sleep(seconds)
+        remaining = deadline - time.perf_counter()
+        if remaining > 0:
+            await asyncio.to_thread(time.sleep, remaining)
+
+    async def _transfer(self, nbytes: int, saturated: bool = False) -> Transmission:
         self.total_bytes_offered += nbytes
-
-        if self.profile.loss_pct > 0 and self._rng.random() * 100.0 < self.profile.loss_pct:
-            self.total_drops += 1
-            # A dropped packet still consumed link time before it was lost.
-            await asyncio.sleep(self.profile.delay_ms / 1000.0)
-            return Transmission(delivered=False, nbytes=nbytes,
-                                propagation_s=self.profile.delay_ms / 1000.0)
-
+        queued_at = time.perf_counter()
         async with self._lock:
+            queued_s = time.perf_counter() - queued_at
             self._refill()
             rate = self.rate_bytes_s
-            # Waiting for enough credit *is* the time the link needs to clock
-            # these bytes out; charging serialization again would double-count.
-            airtime = max(nbytes - self._tokens, 0.0) / rate
+            if saturated:
+                self._tokens = 0.0
+            serialization = max(nbytes - self._tokens, 0.0) / rate
             self._tokens = max(self._tokens - nbytes, 0.0)
+            # Reserve link time until serialization finishes. All cameras and
+            # the prober queue here; propagation does not occupy the wire.
+            if serialization:
+                await self._delay(serialization)
+                self._last_refill = time.perf_counter()
+            airtime = queued_s + serialization
 
         jitter = self._rng.uniform(-self.profile.jitter_ms, self.profile.jitter_ms)
         propagation = max(self.profile.delay_ms + jitter, 0.0) / 1000.0
+        dropped = self._rng.random() * 100.0 < self.profile.loss_pct
+        await self._delay(propagation)
+        if dropped:
+            self.total_drops += 1
+        else:
+            self.total_bytes_delivered += nbytes
+        return Transmission(not dropped, nbytes, airtime, propagation)
 
-        await asyncio.sleep(airtime + propagation)
-
-        self.total_bytes_delivered += nbytes
-        return Transmission(True, nbytes, airtime, propagation)
+    async def transmit(self, nbytes: int) -> Transmission:
+        """Queue a payload on the shared rate-limited backhaul."""
+        return await self._transfer(nbytes)
 
     async def saturating_transfer(self, nbytes: int) -> Transmission:
-        """Transfer used by the QoS prober, not by payload traffic.
-
-        A single short transfer across an idle link rides on accumulated burst
-        credit and reports far more than the link can sustain. A real iperf3
-        run does not: it saturates the link long enough that the shaper is the
-        binding constraint. Draining the bucket inside the lock reproduces that
-        steady state, so the probe reports achievable rather than burst rate.
-
-        Holding the lock for the transfer also means payload traffic queues
-        behind the probe, as it would behind a real measurement stream.
-        """
-        self.total_bytes_offered += nbytes
-
-        if self.profile.loss_pct > 0 and self._rng.random() * 100.0 < self.profile.loss_pct:
-            self.total_drops += 1
-            await asyncio.sleep(self.profile.delay_ms / 1000.0)
-            return Transmission(False, nbytes,
-                                propagation_s=self.profile.delay_ms / 1000.0)
-
-        async with self._lock:
-            rate = self.rate_bytes_s
-            self._tokens = 0.0          # steady state: no burst credit left
-            self._last_refill = time.perf_counter()
-            airtime = nbytes / rate
-            jitter = self._rng.uniform(-self.profile.jitter_ms, self.profile.jitter_ms)
-            propagation = max(self.profile.delay_ms + jitter, 0.0) / 1000.0
-            await asyncio.sleep(airtime + propagation)
-
-        self.total_bytes_delivered += nbytes
-        return Transmission(True, nbytes, airtime, propagation)
+        """Steady-state probe; returned airtime includes contention queueing."""
+        return await self._transfer(nbytes, saturated=True)
 
     def snapshot(self) -> dict:
         return {
