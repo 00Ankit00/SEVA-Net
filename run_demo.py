@@ -48,7 +48,10 @@ def main() -> None:
     if not args.no_browser:
         Timer(1.5, lambda: webbrowser.open(url)).start()
 
-    uvicorn.run(create_app(args.config), host=host, port=port, log_level="warning")
+    # The live-camera MJPEG stream never ends on its own; without a graceful
+    # timeout, Ctrl-C would wait for every open browser tab to disconnect.
+    uvicorn.run(create_app(args.config), host=host, port=port, log_level="warning",
+                timeout_graceful_shutdown=2)
 
 
 if __name__ == "__main__":

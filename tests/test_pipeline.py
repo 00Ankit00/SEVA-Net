@@ -13,7 +13,7 @@ from unittest.mock import patch
 import cv2
 import numpy as np
 
-from seva.alerts import AlertManager
+from seva.alerts import AlertManager, DetectionAlerter
 from seva.camera import build_cameras
 from seva.config import ROOT, load_config
 from seva.detector import encode_keyframe
@@ -171,6 +171,7 @@ class AsyncPipelineTests(unittest.IsolatedAsyncioTestCase):
         cfg = load_config()
         cfg["camera"].update(source="synthetic", count=4)
         cfg["detector"]["backend"] = "simulated"
+        cfg["live_camera"]["enabled"] = False
         received = []
         async def on_event(payload, meta):
             received.append(payload)
@@ -194,6 +195,40 @@ class AsyncPipelineTests(unittest.IsolatedAsyncioTestCase):
         await node.stop()
         self.assertEqual(received, [])
         self.assertGreater(node.metrics.payloads_dropped, 0)
+
+
+class DetectionAlertTests(unittest.TestCase):
+    def setUp(self):
+        self.alerter = DetectionAlerter(load_config()["detection_alerts"])
+        self.live = {"CAM-05"}
+
+    def event(self, ts, label="person", camera="CAM-05", conf=.9, **extra):
+        return {"camera_id": camera, "label": label, "event": "intrusion",
+                "conf": conf, "detect_ts": ts, "mode": "high", **extra}
+
+    def test_alerts_once_on_entry_and_rearms_after_absence(self):
+        first = self.alerter.decide(self.event(100, thumbnail="abc"), self.live)
+        self.assertEqual((first["kind"], first["level"]), ("detection", "warning"))
+        self.assertEqual(first["message"], "Person detected on CAM-05")
+        self.assertEqual(first["thumbnail"], "abc")
+        # Continuous presence never re-alerts.
+        for ts in range(101, 140):
+            self.assertIsNone(self.alerter.decide(self.event(ts), self.live))
+        # Absent longer than rearm_s and past the cooldown -> alerts again.
+        self.assertIsNotNone(self.alerter.decide(self.event(150), self.live))
+        # Re-entry inside the cooldown is suppressed.
+        self.assertIsNone(self.alerter.decide(self.event(160), self.live))
+
+    def test_classes_are_independent_and_filters_apply(self):
+        self.assertIsNotNone(self.alerter.decide(self.event(100), self.live))
+        car = self.alerter.decide(self.event(101, label="car"), self.live)
+        self.assertEqual(car["level"], "info")
+        self.assertIsNone(self.alerter.decide(self.event(102, label="truck", conf=.2), self.live))
+        self.assertIsNone(self.alerter.decide(self.event(103, camera="CAM-01"), self.live))
+        self.alerter.cfg["cameras"] = "all"
+        self.assertIsNotNone(self.alerter.decide(self.event(104, camera="CAM-01"), self.live))
+        self.alerter.cfg["enabled"] = False
+        self.assertIsNone(self.alerter.decide(self.event(200, label="bus"), self.live))
 
 
 class MetricsTests(unittest.TestCase):

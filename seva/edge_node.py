@@ -15,7 +15,7 @@ import asyncio
 import time
 from pathlib import Path
 
-from .camera import build_cameras
+from .camera import build_cameras, build_live_camera
 from .alerts import AlertManager
 from .detector import build_detector, crop_roi, encode_full_frame, encode_keyframe
 from .encoder import SemanticEncoder, MODE_HIGH, MODE_RICH
@@ -63,6 +63,7 @@ class EdgeNode:
         self._transmissions: set[asyncio.Task] = set()
         self.camera = None
         self.detector = None
+        self.live_camera = None
         self.latest_sample: QoSSample | None = None
         self.running = False
         self.paused = False
@@ -72,6 +73,11 @@ class EdgeNode:
     # -- lifecycle ---------------------------------------------------------
     def prepare(self) -> None:
         self.cameras = build_cameras(self.cfg.get("camera", {}), self.root)
+        # The live camera joins the same shared link/encoder as the recorded ones.
+        self.live_camera = build_live_camera(self.cfg.get("live_camera", {}),
+                                             f"CAM-{len(self.cameras) + 1:02d}")
+        if self.live_camera is not None:
+            self.cameras.append(self.live_camera)
         self.detectors = [build_detector(self.cfg.get("detector", {})) for _ in self.cameras]
         self.camera, self.detector = self.cameras[0], self.detectors[0]
         for camera, detector in zip(self.cameras, self.detectors):
@@ -80,8 +86,10 @@ class EdgeNode:
                 "detector": detector.info.backend, "frame_index": 0,
                 "fps": 0.0, "width": getattr(camera, "W", 640),
                 "height": getattr(camera, "H", 360), "last_event_ts": None,
+                "live": camera.live,
             }
-        self.status_note = (f"{len(self.cameras)} camera(s)={self.camera.kind} "
+        live = f" + live {self.live_camera.camera_id}" if self.live_camera else ""
+        self.status_note = (f"{len(self.cameras)} camera(s)={self.camera.kind}{live} "
                             f"detector={self.detector.info.backend}; shared link/encoder")
 
     async def start(self) -> None:
@@ -153,7 +161,7 @@ class EdgeNode:
     # -- stages 1, 2, 5 ----------------------------------------------------
     async def _vision_loop(self, camera, detector) -> None:
         loop = asyncio.get_running_loop()
-        fps = max(float(self.cfg.get_path("camera.sample_fps", 4.0)), 0.1)
+        fps = max(float(camera.sample_fps or self.cfg.get_path("camera.sample_fps", 4.0)), 0.1)
         period = 1.0 / fps
         pcfg = self.encoder.payload_cfg
         max_objs = int(pcfg.get("max_objects_per_frame", 4))
@@ -180,6 +188,8 @@ class EdgeNode:
 
             detections = await loop.run_in_executor(
                 None, detector.detect, frame, camera)
+            if camera.live and camera.enabled:
+                camera.last_detections = list(detections)   # boxes for the local preview
             baseline = await loop.run_in_executor(
                 None, encode_full_frame, frame, base_q)
 
@@ -256,8 +266,21 @@ class EdgeNode:
             pass
 
     # -- introspection -----------------------------------------------------
+    def live_status(self) -> dict | None:
+        cam = self.live_camera
+        if cam is None:
+            return None
+        return {"camera_id": cam.camera_id, "label": cam.label, "enabled": cam.enabled,
+                "status": cam.status, "detail": cam.status_detail,
+                "frame_ts": cam.frame_ts,
+                "objects": [{"label": d["label"], "conf": round(float(d["conf"]), 3)}
+                            for d in cam.last_detections]}
+
     def telemetry_snapshot(self, sample=None, decision=None) -> dict:
         sample = sample or self.latest_sample
+        if self.live_camera is not None:
+            self.camera_state[self.live_camera.camera_id].update(
+                status=self.live_camera.status, enabled=self.live_camera.enabled)
         return {
             "type": "telemetry",
             "ts": time.time(),
@@ -283,6 +306,7 @@ class EdgeNode:
                 "camera": getattr(self.camera, "kind", "?"),
                 "cameras": list(self.camera_state.values()),
                 "camera_count": len(self.cameras),
+                "live": self.live_status(),
                 "pending_transmissions": len(self._transmissions),
                 "detector": self.detector.info.backend if self.detector else "?",
                 "detector_detail": self.detector.info.detail if self.detector else "",

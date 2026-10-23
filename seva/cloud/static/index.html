@@ -175,9 +175,21 @@
   .camera-tile.stale{border-color:#814843}.camera-tile.stale img,.camera-tile.stale canvas{opacity:.2}
   .camera-tile.stale .camera-message{color:var(--danger)}
   .camera-tile.stale .rec{animation:none;color:var(--dim)}
-  .wall.focus{grid-template-columns:3fr 1fr;grid-template-rows:repeat(3,minmax(0,1fr))}
+  .wall.grid{grid-template-columns:repeat(var(--cols,2),minmax(0,1fr))}
+  .wall.focus{grid-template-columns:3fr 1fr;grid-template-rows:repeat(var(--others,3),minmax(0,1fr))}
   .wall.focus .camera-tile{aspect-ratio:auto;min-height:70px}
-  .wall.focus .camera-tile.selected{grid-column:1;grid-row:1/4;aspect-ratio:16/9}
+  .wall.focus .camera-tile.selected{grid-column:1;grid-row:1/-1;aspect-ratio:16/9}
+  .wall .camera-tile.live img{width:100%;height:100%;max-width:none;max-height:none;
+                              left:0;top:0;transform:none;object-fit:contain}
+  .camera-tile.live{border-color:#2d5a78}
+  .live-pill{color:#04121f;background:var(--danger);border-radius:3px;padding:0 5px;
+             font-weight:700;letter-spacing:.6px;margin-right:6px}
+  .camera-tile.live.off .live-pill{background:var(--dim)}
+  .live-objects{color:#ffd6a0}
+  .toast img{float:left;width:56px;height:56px;object-fit:cover;margin:2px 10px 0 0;
+             border-radius:4px;border:1px solid var(--line)}
+  .alert-entry.detection{display:flex;gap:8px;align-items:center}
+  .alert-entry img{width:34px;height:34px;object-fit:cover;border-radius:3px;flex:none}
   .wall.focus .camera-tile:not(.selected){grid-column:2}
   .wall.focus .camera-tile:not(.selected) .camera-time,.wall.focus .camera-tile:not(.selected) .tile-age{display:none}
   .wall.single,.wall.expanded{grid-template-columns:1fr}
@@ -306,8 +318,9 @@
     <div class="card">
       <h2>Camera monitoring wall · shared backhaul</h2>
       <div class="wall-controls">
-        <label>Layout <select id="wallLayout"><option value="grid">2×2 grid</option><option value="focus">1+3</option><option value="single">Single view</option></select></label>
+        <label>Layout <select id="wallLayout"><option value="grid">Grid</option><option value="focus">Focus + others</option><option value="single">Single view</option></select></label>
         <label>Camera <select id="wallCamera"></select></label>
+        <button id="liveBtn" hidden>Laptop camera: ON</button>
         <span class="note">Click a tile to expand / return</span>
       </div>
       <div class="wall" id="wall"></div>
@@ -390,7 +403,7 @@
 </main>
 <div id="toasts" aria-live="polite"></div>
 <section class="card" style="margin:0 16px 16px">
-  <h2>Alert history</h2><div class="body" id="alertHistory">No bandwidth alerts yet.</div>
+  <h2>Alert history</h2><div class="body" id="alertHistory">No alerts yet.</div>
 </section>
 
 <script>
@@ -403,23 +416,34 @@ let TH = {bw_switch_down_mbps:1.2, bw_switch_up_mbps:2.0,
 const history = [];      // {t, bw, ewma, mode}
 const MAXPTS = 240;
 let touchedLink = false, touchedEnc = false;
-let dashboardConfig={}, wallMode="high", selectedCamera="CAM-01", expanded=false, layoutChosen=false;
+let dashboardConfig={}, wallMode="high", selectedCamera="CAM-01", expanded=false, layoutChosen=false, cameraChosen=false;
+let liveState=null;
 const cameraTiles=new Map();
+const liveMessages={off:"CAMERA OFF",starting:"CONNECTING TO CAMERA…",unavailable:"CAMERA UNAVAILABLE"};
+function startLiveStream(tile){
+  // Cache-buster forces a fresh MJPEG connection after a server restart.
+  tile.image.src="/api/live/stream?t="+Date.now();
+}
 function ensureCameras(cameras){
   cameras.forEach(camera=>{
     let tile=cameraTiles.get(camera.camera_id);
     if(!tile){
-      const el=document.createElement("div");el.className="camera-tile high";
+      const el=document.createElement("div");el.className="camera-tile high"+(camera.live?" live":"");
       el.tabIndex=0;el.setAttribute("role","button");el.setAttribute("aria-label",`Expand ${camera.camera_id}`);
       const image=document.createElement("img");image.alt=`${camera.camera_id} received image`;image.hidden=true;
       const canvas=document.createElement("canvas");
       const top=document.createElement("div");top.className="camera-top";
       const label=document.createElement("span");label.className="camera-label";label.textContent=camera.camera_id;
+      if(camera.live){
+        const pill=document.createElement("span");pill.className="live-pill";pill.textContent="LIVE";
+        label.textContent=` ${camera.camera_id} · laptop camera`;label.prepend(pill);
+      }
       const clock=document.createElement("span");clock.className="camera-time";top.append(label,clock);
       const bottom=document.createElement("div");bottom.className="camera-bottom";
       const rec=document.createElement("span");rec.className="rec";rec.textContent="● REC";
       const badge=document.createElement("span");badge.className="tile-mode";
       const detection=document.createElement("span");detection.textContent="Waiting for detections";
+      if(camera.live) detection.className="live-objects";
       const age=document.createElement("span");age.className="tile-age";
       bottom.append(rec,badge,detection,age);
       const message=document.createElement("div");message.className="camera-message";
@@ -428,16 +452,27 @@ function ensureCameras(cameras){
       tile={el,image,canvas,badge,detection,age,clock,message,info:camera,latest:null,
             keyframe:null,thumbnail:null,keyframeTs:0,latestTs:0,boxes:[],count:0,received:0,created:Date.now()/1000};
       cameraTiles.set(camera.camera_id,tile);
+      if(camera.live){
+        image.alt=`${camera.camera_id} live laptop camera preview`;image.hidden=false;
+        image.onerror=()=>setTimeout(()=>startLiveStream(tile),2000);
+        startLiveStream(tile);
+        if(!cameraChosen&&!dashboardConfig.default_camera) selectedCamera=camera.camera_id;
+      }
       const select=()=>{if(expanded&&selectedCamera===camera.camera_id){expanded=false;}else{selectedCamera=camera.camera_id;expanded=true;}applyWallLayout();};
       el.onclick=select;el.onkeydown=e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();select();}};
     }
     tile.info=camera;
   });
   if(!layoutChosen) $("wallLayout").value=dashboardConfig.default_layout||"grid";
+  if(!cameraChosen&&dashboardConfig.default_camera&&cameraTiles.has(dashboardConfig.default_camera))
+    selectedCamera=dashboardConfig.default_camera;
   applyWallLayout();refreshWall();
 }
 function applyWallLayout(){
-  $("wall").className="wall "+$("wallLayout").value+(expanded?" expanded":"");
+  const wall=$("wall"), n=cameraTiles.size;
+  wall.className="wall "+$("wallLayout").value+(expanded?" expanded":"");
+  wall.style.setProperty("--cols",n<=4?2:3);
+  wall.style.setProperty("--others",Math.max(n-1,1));
   $("wallCamera").value=selectedCamera;
   cameraTiles.forEach((t,id)=>{
     t.el.classList.toggle("selected",id===selectedCamera);
@@ -445,10 +480,22 @@ function applyWallLayout(){
   });
 }
 $("wallLayout").onchange=()=>{layoutChosen=true;expanded=false;applyWallLayout();};
-$("wallCamera").onchange=()=>{selectedCamera=$("wallCamera").value;applyWallLayout();};
+$("wallCamera").onchange=()=>{cameraChosen=true;selectedCamera=$("wallCamera").value;applyWallLayout();};
+function renderLiveTile(tile){
+  // The preview is the edge's own view; the badge shows how its events cross the link.
+  const status=liveState?.status||"starting";
+  tile.el.classList.toggle("off",status!=="live");
+  tile.canvas.hidden=true;
+  tile.message.textContent="";
+  const objects=liveState?.objects||[];
+  tile.detection.textContent=status!=="live"?(liveMessages[status]||status)
+    :objects.length?"In view: "+objects.map(o=>`${o.label} ${(o.conf*100).toFixed(0)}%`).join(" · ")
+    :"Nothing detected";
+}
 function renderTile(tile){
   tile.el.classList.remove("low","high","rich");tile.el.classList.add(wallMode);
   tile.badge.textContent=wallMode.toUpperCase();
+  if(tile.info.live){renderLiveTile(tile);return;}
   tile.canvas.hidden=wallMode!=="low";
   const bytes=wallMode==="rich"?tile.keyframe:wallMode==="high"?tile.thumbnail:null;
   tile.image.hidden=!bytes;
@@ -474,7 +521,7 @@ function receiveCameraEvent(rec,countEvent){
     if(ts>tile.latestTs) tile.boxes=[];
     tile.latestTs=ts;tile.latest=p;
     tile.boxes.push(p.bbox);
-    tile.detection.textContent=`${p.label} ${(p.conf*100).toFixed(0)}%`;
+    if(!tile.info.live) tile.detection.textContent=`${p.label} ${(p.conf*100).toFixed(0)}%`;
   }
   renderTile(tile);refreshWall();
 }
@@ -484,6 +531,8 @@ function refreshWall(){
     const age=Math.max(0,now-(tile.received||tile.created));
     tile.clock.textContent=new Date().toLocaleTimeString();
     tile.age.textContent=`${tile.count} events · ${tile.received?Math.floor(age)+" s ago":"no events"}`;
+    // An empty room produces no events, so the live tile's freshness is its frames.
+    if(tile.info.live){tile.el.classList.remove("stale");renderTile(tile);return;}
     const stale=age>(dashboardConfig.no_signal_s||8);
     tile.el.classList.toggle("stale",stale);
     if(stale) tile.message.textContent="NO SIGNAL";else renderTile(tile);
@@ -525,19 +574,29 @@ function drainToasts(){
     const title=document.createElement("strong"); title.textContent=a.level.toUpperCase();
     const msg=document.createElement("p"); msg.textContent=a.message;
     const detail=document.createElement("p");
-    detail.textContent=`${a.reason} · ${a.ewma_bw.toFixed(2)} Mbps / ${a.ewma_lat.toFixed(0)} ms`;
-    el.append(close,title,msg,detail);host.append(el);
+    detail.textContent=alertDetail(a);
+    el.append(close);
+    if(a.thumbnail){const img=document.createElement("img");img.alt=`${a.label} snapshot`;
+      img.src="data:image/jpeg;base64,"+a.thumbnail;el.append(img);}
+    el.append(title,msg,detail);host.append(el);
     if(a.level!=="critical") setTimeout(dismiss,(alertConfig.auto_dismiss_s||6)*1000);
   }
+}
+function alertDetail(a){
+  return a.kind==="detection"
+    ? `${a.reason} · sent in ${(a.mode||"").toUpperCase()}`
+    : `${a.reason} · ${a.ewma_bw.toFixed(2)} Mbps / ${a.ewma_lat.toFixed(0)} ms`;
 }
 function addAlert(a,notify){
   alertRecords.push(a);
   while(alertRecords.length>(alertConfig.max_history||200)) alertRecords.shift();
   const panel=$("alertHistory"); panel.replaceChildren();
   [...alertRecords].reverse().forEach(item=>{
-    const row=document.createElement("div");row.className="alert-entry "+item.level;
-    row.textContent=`${new Date(item.ts*1000).toLocaleTimeString()} · ${item.level.toUpperCase()} · ${item.message} · ${item.reason} · ${item.ewma_bw} Mbps / ${item.ewma_lat} ms`;
-    panel.append(row);
+    const row=document.createElement("div");row.className="alert-entry "+item.level+(item.kind==="detection"?" detection":"");
+    if(item.thumbnail){const img=document.createElement("img");img.alt="";img.src="data:image/jpeg;base64,"+item.thumbnail;row.append(img);}
+    const text=document.createElement("span");
+    text.textContent=`${new Date(item.ts*1000).toLocaleTimeString()} · ${item.level.toUpperCase()} · ${item.message} · ${alertDetail(item)}`;
+    row.append(text);panel.append(row);
   });
   if(!notify) return;
   pendingToasts.push(a);drainToasts();beep();
@@ -578,7 +637,14 @@ connect();
 function applyTelemetry(t){
   dashboardConfig=t.dashboard_config||dashboardConfig;
   wallMode=t.mode;
+  liveState=t.pipeline?.live||null;
   ensureCameras(t.pipeline?.cameras||[]);
+  $("liveBtn").hidden=!liveState;
+  if(liveState){
+    $("liveBtn").textContent="Laptop camera: "+(liveState.enabled?"ON":"OFF");
+    $("liveBtn").classList.toggle("on",liveState.enabled);
+    $("liveBtn").title=liveState.detail||"";
+  }
   alertConfig=t.alerts_config||alertConfig;
   if(!soundChosen){
     muted=!alertConfig.sound_enabled;
@@ -620,7 +686,7 @@ function applyTelemetry(t){
       `${(L.jitter_ms||0).toFixed(0)} ms jitter, ${(L.loss_pct||0).toFixed(1)}% loss`;
 
   const P = t.pipeline || {};
-  $("b-camera").textContent = "camera: " + (P.camera||"—");
+  $("b-camera").textContent = "camera: " + (P.camera||"—") + (P.live ? " + webcam" : "");
   $("b-detector").textContent = "detector: " + (P.detector||"—");
   $("b-detector").title = P.detector_detail || "";
   $("scenBtn").textContent = "Scripted scenario: " + (P.scenario_enabled ? "ON" : "OFF");
@@ -854,6 +920,13 @@ $("sAlpha").oninput= e => { $("lAlpha").textContent=(+e.target.value).toFixed(2)
 $("sDown").oninput = e => { $("lDown").textContent=(+e.target.value).toFixed(2)+" Mbps"; pushEnc(); };
 $("sUp").oninput   = e => { $("lUp").textContent=(+e.target.value).toFixed(2)+" Mbps"; pushEnc(); };
 
+$("liveBtn").onclick = () => {
+  const on = liveState?.enabled;
+  post("/api/live/" + (on ? "stop" : "start")).then(r=>{
+    if(r.live){liveState=r.live;$("liveBtn").textContent="Laptop camera: "+(r.live.enabled?"ON":"OFF");
+      $("liveBtn").classList.toggle("on",r.live.enabled);}
+  });
+};
 $("scenBtn").onclick = () => {
   const on = $("scenBtn").classList.contains("on");
   touchedLink = false;

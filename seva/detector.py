@@ -170,6 +170,43 @@ def encode_full_frame(frame, quality: int) -> int:
     return int(buf.nbytes) if ok else 0
 
 
+# BGR box colours for the live preview: people stand out from vehicles.
+PREVIEW_COLOURS = {"person": (80, 80, 255), "bicycle": (255, 170, 60),
+                   "motorcycle": (255, 170, 60)}
+PREVIEW_VEHICLE = (60, 220, 255)
+
+
+def encode_preview(frame, detections: list[dict], quality: int) -> bytes | None:
+    """Annotated JPEG of the live camera for the local monitoring tile."""
+    if cv2 is None or frame is None:
+        return None
+    image = frame.copy()
+    for detection in detections:
+        x, y, bw, bh = detection["bbox"]
+        colour = PREVIEW_COLOURS.get(detection["label"], PREVIEW_VEHICLE)
+        cv2.rectangle(image, (x, y), (x + bw, y + bh), colour, 2)
+        label = f"{detection['label']} {detection['conf']:.0%}"
+        (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.55, 1)
+        top = max(y - th - 8, 0)
+        cv2.rectangle(image, (x, top), (x + tw + 8, top + th + 8), colour, -1)
+        cv2.putText(image, label, (x + 4, top + th + 3), cv2.FONT_HERSHEY_SIMPLEX,
+                    0.55, (0, 0, 0), 1, cv2.LINE_AA)
+    ok, buf = cv2.imencode(".jpg", image, [int(cv2.IMWRITE_JPEG_QUALITY), int(quality)])
+    return buf.tobytes() if ok else None
+
+
+def encode_placeholder(text: str, width: int = 640, height: int = 480) -> bytes | None:
+    """Dark frame with a status message, streamed while the camera is not live."""
+    if cv2 is None:
+        return None
+    image = np.full((height, width, 3), (20, 14, 10), dtype=np.uint8)
+    (tw, th), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 0.7, 2)
+    cv2.putText(image, text, ((width - tw) // 2, (height + th) // 2),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (84, 180, 255), 2, cv2.LINE_AA)
+    ok, buf = cv2.imencode(".jpg", image, [int(cv2.IMWRITE_JPEG_QUALITY), 70])
+    return buf.tobytes() if ok else None
+
+
 def encode_keyframe(frame, detections: list[dict], max_px: int, quality: int) -> bytes | None:
     """Downscale and annotate a copy at the edge; transmit only the encoded JPEG."""
     if cv2 is None or frame is None:

@@ -23,6 +23,28 @@ python run_demo.py                 # dashboard opens at http://127.0.0.1:8000
 Both fetched assets are optional. Without them the pipeline falls back to a
 synthetic camera and a simulated detector and still runs end to end.
 
+Or do all three steps in one command (installed packages and downloaded assets
+are skipped on later runs; `--skip-fetch` skips downloading):
+
+```bash
+python start.py
+```
+
+### Live laptop camera (CAM-05)
+
+With `live_camera.enabled: true` (the default), the laptop webcam joins the wall
+as a fifth, live camera. It runs the same YOLOv8n detector and its events cross
+the same shared link and encoder as the recorded cameras. Its tile shows a local
+annotated preview (`/api/live/stream`), and the **Laptop camera: ON/OFF** button
+releases the device entirely.
+
+When a person, bicycle, motorbike, car, bus or truck *enters* the live view, the
+cloud raises a detection alert. The alert includes the ROI snapshot when the link
+mode allowed one through. A class re-alerts only after it has been absent for
+`detection_alerts.rearm_s`, and never more often than `cooldown_s`. Alert levels
+and the watched cameras are set under `detection_alerts` in `config.yaml`.
+`run_trial.py` leaves the webcam off unless you pass `--live`.
+
 To produce report numbers with no dashboard:
 
 ```bash

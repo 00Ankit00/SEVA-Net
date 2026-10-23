@@ -14,6 +14,37 @@ camera:
   seed: 11               # Synthetic scene seed; camera index gives each a distinct scene.
   reuse_offset_s: 7.0    # Playback offset between cameras that reuse the same video.
 
+live_camera:
+  # A local capture device (the laptop webcam) added after the recorded cameras
+  # as a live edge camera. It runs the same detector and shares the same
+  # link/encoder; the dashboard also shows a local annotated preview of it.
+  enabled: true
+  device: 0                # OpenCV device index; try 1 for an external USB camera
+  camera_id: ""            # empty -> next id after the recorded cameras (CAM-05)
+  label: "Laptop camera"
+  start_on: true           # false -> camera stays off until switched on in the dashboard
+  width: 640
+  height: 480
+  sample_fps: 6.0          # detection rate for this camera (recorded cameras use camera.sample_fps)
+  preview_fps: 12          # local preview frame rate
+  preview_jpeg_quality: 70
+  reconnect_delay_s: 2.0
+
+detection_alerts:
+  # Object alerts raised by the cloud when a class enters a watched camera's view.
+  enabled: true
+  cameras: "live"          # live | all | [CAM-01, CAM-05]
+  min_conf: 0.50
+  rearm_s: 5.0             # class must be absent this long before it alerts again
+  cooldown_s: 20.0         # minimum gap between alerts for one class on one camera
+  levels:                  # critical | warning | info; classes not listed never alert
+    person: warning
+    bicycle: info
+    motorcycle: info
+    car: info
+    bus: info
+    truck: info
+
 detector:
   # FR-4. YOLOv8n if ultralytics is installed, else the deterministic
   # simulated detector so the pipeline is always demonstrable.
@@ -106,7 +137,8 @@ alerts:
 
 dashboard:
   no_signal_s: 8.0         # Camera tile becomes stale after this long without events.
-  default_layout: "grid"  # grid (2x2), focus (1+3), or single.
+  default_layout: "focus" # grid, focus (selected camera large + the rest), or single.
+  default_camera: ""       # camera shown large first; empty -> the live camera, else CAM-01
   max_feed_events: 60      # Maximum rendered detection-event rows.
   chart_samples: 240      # Maximum rendered QoS samples.
   max_snapshot_events: 200 # Events replayed to a newly connected browser.

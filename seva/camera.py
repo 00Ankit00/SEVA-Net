@@ -15,6 +15,8 @@ and both reconnect automatically when the source ends or errors (FR-2).
 from __future__ import annotations
 
 import math
+import sys
+import threading
 import time
 from pathlib import Path
 
@@ -29,6 +31,8 @@ except ImportError:  # pragma: no cover
 class BaseCamera:
     camera_id = "CAM-01"
     kind = "base"
+    live = False
+    sample_fps: float | None = None   # None -> camera.sample_fps from config
 
     def read(self):
         raise NotImplementedError
@@ -152,6 +156,143 @@ class SyntheticCamera(BaseCamera):
                           "conf": 0.80 + 0.15 * abs(math.sin(self.t + a["phase"]))})
         self.last_boxes = boxes
         return frame
+
+
+class WebcamCamera(BaseCamera):
+    """A local capture device (the laptop camera) acting as a live edge camera.
+
+    A background thread keeps only the newest frame, so detection never works
+    on a stale buffered frame and the local preview stays smooth. The device is
+    opened lazily and reopened after a drop; stop() releases it entirely so the
+    camera light goes off.
+    """
+
+    kind = "webcam"
+    live = True
+
+    def __init__(self, device: int = 0, camera_id: str = "CAM-05", *,
+                 width: int = 640, height: int = 480, sample_fps: float = 6.0,
+                 reconnect_delay_s: float = 2.0, label: str = "Laptop camera",
+                 enabled: bool = True):
+        if cv2 is None:
+            raise RuntimeError("OpenCV is required for WebcamCamera")
+        self.device = device
+        self.camera_id = camera_id
+        self.label = label
+        self.W, self.H = int(width), int(height)
+        self.sample_fps = float(sample_fps)
+        self.reconnect_delay_s = float(reconnect_delay_s)
+        self.reconnects = 0
+        self.status = "off"
+        self.status_detail = ""
+        self.last_detections: list[dict] = []
+        self.frame_seq = 0
+        self.frame_ts = 0.0
+        self._frame = None
+        self._lock = threading.Lock()
+        self._enabled = threading.Event()
+        self._closed = False
+        self._thread = threading.Thread(target=self._capture_loop,
+                                        name=f"seva-webcam-{camera_id}", daemon=True)
+        if enabled:
+            self._enabled.set()
+            self.status = "starting"
+        self._thread.start()
+
+    # -- control -----------------------------------------------------------
+    @property
+    def enabled(self) -> bool:
+        return self._enabled.is_set()
+
+    def start(self) -> None:
+        if not self._enabled.is_set():
+            self.status, self.status_detail = "starting", ""
+            self._enabled.set()
+
+    def stop(self) -> None:
+        self._enabled.clear()
+        with self._lock:
+            self._frame = None
+            self.last_detections = []
+
+    def release(self):
+        self._closed = True
+        self.stop()
+        self._thread.join(timeout=3.0)
+
+    # -- capture thread ----------------------------------------------------
+    def _open(self):
+        # DirectShow opens in ~1 s on Windows; the default MSMF backend can take ~20 s.
+        api = cv2.CAP_DSHOW if sys.platform == "win32" else cv2.CAP_ANY
+        cap = cv2.VideoCapture(self.device, api)
+        if not cap.isOpened():
+            cap.release()
+            return None
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.W)
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.H)
+        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+        return cap
+
+    def _capture_loop(self):
+        cap = None
+        while not self._closed:
+            if not self._enabled.wait(timeout=0.25):
+                if cap is not None:
+                    cap.release()
+                    cap = None
+                    self.status = "off"
+                continue
+            if cap is None:
+                cap = self._open()
+                if cap is None:
+                    self.status = "unavailable"
+                    self.status_detail = (f"cannot open camera device {self.device} "
+                                          f"(in use by another app, or blocked in privacy settings)")
+                    time.sleep(self.reconnect_delay_s)
+                    continue
+                self.status, self.status_detail = "live", ""
+            ok, frame = cap.read()
+            if not ok or frame is None:
+                # Drop -> release and reopen on the next pass (FR-2).
+                cap.release()
+                cap = None
+                self.reconnects += 1
+                self.status, self.status_detail = "unavailable", "camera stream dropped; reconnecting"
+                time.sleep(self.reconnect_delay_s)
+                continue
+            with self._lock:
+                if not self._enabled.is_set():
+                    continue
+                self._frame = frame
+                self.frame_seq += 1
+                self.frame_ts = time.time()
+        if cap is not None:
+            cap.release()
+        self.status = "off"
+
+    # -- pipeline interface ------------------------------------------------
+    def read(self):
+        with self._lock:
+            return None if self._frame is None else self._frame.copy()
+
+    def latest(self):
+        """(frame, sequence number, detections) for the local preview."""
+        with self._lock:
+            return self._frame, self.frame_seq, list(self.last_detections)
+
+
+def build_live_camera(cfg: dict, default_id: str) -> WebcamCamera | None:
+    if not cfg.get("enabled", False) or cv2 is None:
+        return None
+    return WebcamCamera(
+        device=int(cfg.get("device", 0)),
+        camera_id=str(cfg.get("camera_id") or default_id),
+        width=int(cfg.get("width", 640)), height=int(cfg.get("height", 480)),
+        sample_fps=float(cfg.get("sample_fps", 6.0)),
+        reconnect_delay_s=float(cfg.get("reconnect_delay_s", 2.0)),
+        label=str(cfg.get("label", "Laptop camera")),
+        enabled=bool(cfg.get("start_on", True)),
+    )
 
 
 def build_camera(cfg: dict, root: Path, index: int = 0) -> BaseCamera:

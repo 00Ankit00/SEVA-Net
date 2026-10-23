@@ -14,10 +14,12 @@ from collections import deque
 from pathlib import Path
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
+from ..alerts import DetectionAlerter
 from ..config import load_config
+from ..detector import encode_placeholder, encode_preview
 from ..edge_node import EdgeNode
 from ..link import LinkProfile
 
@@ -61,6 +63,7 @@ def create_app(config_path: str | None = None) -> FastAPI:
     events: deque[dict] = deque(maxlen=int(cfg.get_path("cloud.max_events", 400)))
     alerts: deque[dict] = deque(maxlen=int(cfg.get_path("alerts.max_history", 200)))
     state: dict = {"node": None, "loop": None, "last_telemetry": None}
+    detection_alerts = DetectionAlerter(cfg.get("detection_alerts", {}))
 
     # -- edge -> cloud ingest ---------------------------------------------
     async def on_event(payload: dict, meta: dict) -> None:
@@ -73,6 +76,11 @@ def create_app(config_path: str | None = None) -> FastAPI:
         }
         events.append(record)          # FR-16: historical log
         await hub.broadcast(record)    # FR-14: near-real-time display
+        live_ids = {node.live_camera.camera_id} if node.live_camera else set()
+        alert = detection_alerts.decide(payload, live_ids)
+        if alert is not None:
+            alerts.append(alert)
+            await hub.broadcast(alert)
 
     def on_telemetry(snapshot: dict) -> None:
         state["last_telemetry"] = snapshot
@@ -106,7 +114,9 @@ def create_app(config_path: str | None = None) -> FastAPI:
     # -- dashboard ---------------------------------------------------------
     @app.get("/")
     async def index() -> FileResponse:
-        return FileResponse(STATIC / "index.html")
+        # no-cache: browsers must revalidate, so a stale dashboard is never shown
+        return FileResponse(STATIC / "index.html",
+                            headers={"Cache-Control": "no-cache"})
 
     app.mount("/static", StaticFiles(directory=str(STATIC)), name="static")
 
@@ -171,6 +181,61 @@ def create_app(config_path: str | None = None) -> FastAPI:
             return JSONResponse({"error": str(exc)}, status_code=400)
         node.alerts.cfg = candidate
         return JSONResponse({"ok": True, "alerts_config": candidate})
+
+    # -- live camera -------------------------------------------------------
+    @app.get("/api/live/stream")
+    async def live_stream() -> StreamingResponse:
+        """MJPEG preview of the live camera with detection boxes drawn on.
+
+        This is the operator's local view of the edge camera. Detection events
+        from the same camera still cross the shared link like every other one.
+        """
+        live_cfg = cfg.get("live_camera", {})
+        period = 1.0 / max(float(live_cfg.get("preview_fps", 12)), 1.0)
+        quality = int(live_cfg.get("preview_jpeg_quality", 70))
+        placeholders = {"off": "CAMERA OFF", "starting": "CONNECTING TO CAMERA...",
+                        "unavailable": "CAMERA UNAVAILABLE"}
+
+        async def frames():
+            loop = asyncio.get_running_loop()
+            last_seq = -1
+            while True:
+                cam = node.live_camera
+                frame, seq, detections = cam.latest() if cam else (None, -1, [])
+                if frame is not None and seq != last_seq:
+                    jpeg = await loop.run_in_executor(None, encode_preview, frame,
+                                                      detections, quality)
+                    last_seq = seq
+                elif frame is None:
+                    text = placeholders.get(cam.status if cam else "off", "NO SIGNAL")
+                    jpeg = await loop.run_in_executor(None, encode_placeholder, text,
+                                                      getattr(cam, "W", 640), getattr(cam, "H", 480))
+                    last_seq = -1
+                    await asyncio.sleep(0.5)
+                else:
+                    await asyncio.sleep(period / 2)
+                    continue
+                if jpeg:
+                    yield (b"--frame\r\nContent-Type: image/jpeg\r\nContent-Length: "
+                           + str(len(jpeg)).encode() + b"\r\n\r\n" + jpeg + b"\r\n")
+                await asyncio.sleep(period)
+
+        return StreamingResponse(frames(), media_type="multipart/x-mixed-replace; boundary=frame",
+                                 headers={"Cache-Control": "no-store"})
+
+    @app.post("/api/live/{action}")
+    async def live_control(action: str) -> JSONResponse:
+        cam = node.live_camera
+        if cam is None:
+            return JSONResponse({"error": "live camera is disabled in config.yaml"},
+                                status_code=404)
+        if action == "start":
+            cam.start()
+        elif action == "stop":
+            cam.stop()
+        else:
+            return JSONResponse({"error": "action must be start or stop"}, status_code=400)
+        return JSONResponse({"ok": True, "live": node.live_status()})
 
     # -- REST: demo controls ----------------------------------------------
     @app.post("/api/link/preset/{name}")

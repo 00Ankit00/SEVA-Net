@@ -121,9 +121,12 @@ def main() -> None:
     ap.add_argument("--tag", default="default")
     ap.add_argument("--preset", default=None, help="hold a configured link preset; disable timeline")
     ap.add_argument("--cameras", type=int, default=None, help="override camera.count for this trial")
+    ap.add_argument("--live", action="store_true",
+                    help="include the live laptop camera (off by default so trials are reproducible)")
     args = ap.parse_args()
 
     cfg = load_config(args.config)
+    cfg.setdefault("live_camera", {})["enabled"] = args.live
     if args.preset:
         preset = cfg.get_path("link.presets", {}).get(args.preset)
         if preset is None:
